@@ -1,0 +1,20 @@
+# Explicit local object-storage override. Database and application settings are inherited.
+storage:
+  provider: s3
+  gcs:
+    credentialsSecret: ""
+    workloadIdentity:
+      enabled: false
+  s3:
+    bucket: courses
+    prefix: courses/
+    endpoint: ""
+    existingSecret: test-minio
+    accessKeyKey: rootUser
+    secretKeyKey: rootPassword
+minio:
+  enabled: true
+  existingSecret: test-minio
+  persistence:
+    storageClass: microk8s-hostpath
+    size: 5Gi

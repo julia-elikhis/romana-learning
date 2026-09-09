@@ -51,6 +51,15 @@ spec:
             - configMapRef:
                 name: {{ include "romanian.name" . }}
           env:
+            {{- if and (eq .Values.storage.provider "gcs") .Values.storage.gcs.settingsSecret }}
+            {{- range $key := list "GOOGLE_CLOUD_PROJECT" "COURSE_STORAGE_BUCKET" "COURSE_STORAGE_PREFIX" }}
+            - name: {{ $key }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $.Values.storage.gcs.settingsSecret }}
+                  key: {{ $key }}
+            {{- end }}
+            {{- end }}
             {{- with .Values.auth.existingSecret }}
             {{- range $key := list "GITHUB_CLIENT_ID" "GITHUB_CLIENT_SECRET" "APP_BASE_URL" "AUTH_LEGACY_GITHUB_ID" }}
             - name: {{ $key }}
@@ -123,6 +132,14 @@ spec:
                   key: {{ .Values.database.passwordKey }}
             {{- end }}
           volumeMounts:
+            {{- if and (eq .Values.storage.provider "gcs") .Values.storage.gcs.workloadIdentity.enabled }}
+            - name: workload-token
+              mountPath: /var/run/secrets/google
+              readOnly: true
+            - name: workload-identity
+              mountPath: /etc/workload-identity
+              readOnly: true
+            {{- end }}
             - name: temporary
               mountPath: /tmp
             {{- if eq .Values.storage.provider "filesystem" }}
@@ -157,6 +174,23 @@ spec:
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
       volumes:
+        {{- if and (eq .Values.storage.provider "gcs") .Values.storage.gcs.workloadIdentity.enabled }}
+        - name: workload-token
+          projected:
+            defaultMode: 0440
+            sources:
+              - serviceAccountToken:
+                  audience: {{ printf "https://iam.googleapis.com/%s" .Values.storage.gcs.workloadIdentity.provider | quote }}
+                  expirationSeconds: 3600
+                  path: token
+        - name: workload-identity
+          secret:
+            secretName: {{ .Values.storage.gcs.workloadIdentity.credentialsSecret }}
+            defaultMode: 0440
+            items:
+              - key: credentials.json
+                path: credentials.json
+        {{- end }}
         - name: temporary
           emptyDir:
             sizeLimit: 128Mi

@@ -8,6 +8,9 @@
 {{- required "serviceAccount.name is required when create=false" .Values.serviceAccount.name -}}
 {{- end -}}
 {{- end -}}
+{{- define "romanian.ingressHost" -}}
+{{- default (get (urlParse .Values.auth.baseURL) "host") .Values.ingress.host -}}
+{{- end -}}
 {{- define "romanian.claimName" -}}
 {{- default (printf "%s-courses" (include "romanian.name" .) | trunc 63 | trimSuffix "-") .Values.storage.filesystem.persistence.existingClaim -}}
 {{- end -}}

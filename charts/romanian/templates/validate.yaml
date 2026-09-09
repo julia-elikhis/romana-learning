@@ -1,3 +1,12 @@
+{{- with .Values.serviceAccount.gcpServiceAccount }}
+{{- if not $.Values.serviceAccount.create }}
+{{- fail "serviceAccount.gcpServiceAccount requires a chart-managed ServiceAccount; annotate an externally managed account through its owner" }}
+{{- end }}
+{{- $annotation := index $.Values.serviceAccount.annotations "iam.gke.io/gcp-service-account" }}
+{{- if and $annotation (ne $annotation .) }}
+{{- fail "serviceAccount.gcpServiceAccount conflicts with the Google service-account annotation" }}
+{{- end }}
+{{- end }}
 {{- if eq .Values.database.mode "parameters" }}
 {{- $_ := required "database.host is required in parameters mode" .Values.database.host }}
 {{- if or (eq .Values.database.name "postgres") (hasPrefix "template" .Values.database.name) }}
@@ -8,6 +17,30 @@
 {{- $_ := required "Public deployment requires auth.existingSecret" .Values.auth.existingSecret }}
 {{- if not (hasPrefix "https://" .Values.auth.baseURL) }}
 {{- fail "Public deployment requires an HTTPS auth.baseURL" }}
+{{- end }}
+{{- end }}
+{{- if .Values.ingress.enabled }}
+{{- if not (regexMatch "^https://[a-z0-9]([a-z0-9.-]*[a-z0-9])?/?$" .Values.auth.baseURL) }}
+{{- fail "Ingress requires auth.baseURL to be an HTTPS hostname without a port, path, query, or credentials" }}
+{{- end }}
+{{- $host := include "romanian.ingressHost" . }}
+{{- if ne $host (get (urlParse .Values.auth.baseURL) "host") }}
+{{- fail "ingress.host must match auth.baseURL for GitHub authentication" }}
+{{- end }}
+{{- $annotations := .Values.ingress.annotations }}
+{{- if and (or (index $annotations "cert-manager.io/cluster-issuer") (index $annotations "cert-manager.io/issuer") (eq (index $annotations "kubernetes.io/tls-acme") "true")) (not .Values.ingress.tls) }}
+{{- fail "cert-manager requires ingress.tls with a certificate secretName" }}
+{{- end }}
+{{- if .Values.ingress.tls }}
+{{- $covered := false }}
+{{- range .Values.ingress.tls }}
+{{- if has $host (default (list $host) .hosts) }}
+{{- $covered = true }}
+{{- end }}
+{{- end }}
+{{- if not $covered }}
+{{- fail "ingress.tls must include the ingress hostname" }}
+{{- end }}
 {{- end }}
 {{- end }}
 {{- if eq .Values.storage.provider "filesystem" }}
@@ -26,7 +59,16 @@
 {{- end }}
 {{- end }}
 {{- if eq .Values.storage.provider "gcs" }}
+{{- if not .Values.storage.gcs.settingsSecret }}
 {{- $_ := required "storage.gcs.bucket is required for GCS" .Values.storage.gcs.bucket }}
+{{- end }}
+{{- if .Values.storage.gcs.workloadIdentity.enabled }}
+{{- if .Values.storage.gcs.credentialsSecret }}
+{{- fail "Workload Identity cannot be combined with a credential-file Secret" }}
+{{- end }}
+{{- $_ := required "storage.gcs.workloadIdentity.provider is required for federation" .Values.storage.gcs.workloadIdentity.provider }}
+{{- $_ := required "Workload Identity requires an external_account configuration Secret" .Values.storage.gcs.workloadIdentity.credentialsSecret }}
+{{- end }}
 {{- end }}
 
 {{- if eq .Values.storage.provider "s3" }}

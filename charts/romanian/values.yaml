@@ -32,7 +32,7 @@ database:
 
 # Original course files; metadata and exercise drafts are stored in Postgres.
 storage:
-  provider: disabled # disabled | filesystem | gcs | s3
+  provider: gcs # disabled | filesystem | gcs | s3
   filesystem:
     mountPath: /data/courses
     persistence:
@@ -45,9 +45,16 @@ storage:
       # Retain a chart-created claim on uninstall. Backups are managed separately.
       keep: true
   gcs:
+    project: ""
     bucket: ""
     prefix: courses/
-    project: ""
+    # Contains GOOGLE_CLOUD_PROJECT, COURSE_STORAGE_BUCKET, COURSE_STORAGE_PREFIX.
+    settingsSecret: google-storage
+    workloadIdentity:
+      # Enable for non-GKE Kubernetes federation. GKE uses its metadata server.
+      enabled: false
+      provider: "" # projects/NUMBER/locations/global/workloadIdentityPools/POOL/providers/PROVIDER
+      credentialsSecret: google-workload-identity # external_account configuration, without a private key
     # Leave blank to use Application Default Credentials / Workload Identity.
     credentialsSecret: ""
     credentialsKey: credentials.json
@@ -99,6 +106,8 @@ generation:
 serviceAccount:
   create: true
   name: ""
+  # Deployment supplies the Google account from the encrypted GCS_SERVICE_ACCOUNT setting.
+  gcpServiceAccount: ""
   annotations: {}
   automountServiceAccountToken: false
 
@@ -111,7 +120,9 @@ ingress:
   enabled: false
   className: ""
   annotations: {}
-  host: romanian.example.com
+  # Empty: derive the host from auth.baseURL (supplied from production APP_BASE_URL).
+  host: ""
+  # Each entry needs secretName; omitted hosts default to the ingress host.
   tls: []
 
 resources:

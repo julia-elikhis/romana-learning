@@ -1,17 +1,18 @@
-name: romanian
+# This stack owns local data volumes. Production settings must never be used here.
+name: ${ROMANA_LOCAL_COMPOSE_PROJECT:?Use make APP_ENV=local secrets-exec for the local Compose stack}
 services:
   postgres:
     image: postgres:17-alpine
     environment:
       POSTGRES_DB: romanian
-      POSTGRES_USER: romanian
-      POSTGRES_PASSWORD: local-development-only
+      POSTGRES_USER: ${PGUSER:?Load SOPS settings with make secrets-exec}
+      POSTGRES_PASSWORD: ${PGPASSWORD:?Load SOPS settings with make secrets-exec}
     ports:
       - "127.0.0.1:5432:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U romanian -d romanian"]
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
       interval: 3s
       timeout: 3s
       retries: 20
@@ -19,8 +20,8 @@ services:
     image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
     command: server /data --console-address :9001
     environment: &minio-credentials
-      MINIO_ROOT_USER: romanian-local
-      MINIO_ROOT_PASSWORD: local-minio-development-only
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?Load SOPS settings with make secrets-exec}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Load SOPS settings with make secrets-exec}
     ports:
       - "127.0.0.1:9000:9000"
       - "127.0.0.1:9001:9001"
@@ -64,18 +65,28 @@ services:
     restart: unless-stopped
     environment:
       APP_MODE: local
-      DATABASE_URL: postgres://romanian:local-development-only@postgres:5432/romanian?sslmode=disable
+      PGHOST: postgres
+      PGDATABASE: romanian
+      PGUSER: ${PGUSER:?Load SOPS settings with make secrets-exec}
+      PGPASSWORD: ${PGPASSWORD:?Load SOPS settings with make secrets-exec}
+      PGSSLMODE: disable
       HTTP_ADDR: 0.0.0.0:8080
       COURSE_STORAGE_PROVIDER: s3
       COURSE_S3_ENDPOINT: http://minio:9000
       COURSE_STORAGE_BUCKET: courses
       COURSE_STORAGE_PREFIX: courses/
       COURSE_S3_REGION: us-east-1
-      COURSE_S3_ACCESS_KEY: romanian-local
-      COURSE_S3_SECRET_KEY: local-minio-development-only
-    env_file:
-      - path: .env
-        required: false
+      COURSE_S3_ACCESS_KEY: ${MINIO_ROOT_USER:?Load SOPS settings with make secrets-exec}
+      COURSE_S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?Load SOPS settings with make secrets-exec}
+      EXERCISE_API_URL: ${EXERCISE_API_URL:-}
+      EXERCISE_API_KEY: ${EXERCISE_API_KEY:-}
+      EXERCISE_API_MODEL: ${EXERCISE_API_MODEL:-}
+      EXERCISE_API_EFFORT: ${EXERCISE_API_EFFORT:-}
+      EXERCISE_API_EFFORT_FORMAT: ${EXERCISE_API_EFFORT_FORMAT:-}
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
+      APP_BASE_URL: ${APP_BASE_URL:-http://localhost:8080}
+      AUTH_LEGACY_GITHUB_ID: ${AUTH_LEGACY_GITHUB_ID:-}
     ports:
       - "127.0.0.1:8080:8080"
     depends_on:

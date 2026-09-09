@@ -2,6 +2,7 @@ package charttest
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"os/exec"
 	"path/filepath"
@@ -132,20 +133,25 @@ func TestClaimCreationAndGCSProfiles(t *testing.T) {
 
 func TestInvalidChartSettingsFail(t *testing.T) {
 	tests := map[string]string{
-		"missing database host":    "database.mode=parameters",
-		"maintenance database":     "database.mode=parameters,database.host=db.internal,database.name=postgres",
-		"ephemeral files":          "storage.provider=filesystem",
-		"conflicting claims":       "storage.provider=filesystem,storage.filesystem.persistence.create=true,storage.filesystem.persistence.existingClaim=already-exists",
-		"missing bucket":           "storage.provider=gcs",
-		"invalid provider":         "storage.provider=unknown",
-		"invalid TLS":              "database.sslMode=bogus",
-		"invalid database port":    "database.port=70000",
-		"missing reused account":   "serviceAccount.create=false",
-		"multiple writers":         "storage.provider=filesystem,storage.filesystem.persistence.create=true,replicaCount=2",
-		"overlapping disk rollout": "storage.provider=filesystem,storage.filesystem.persistence.create=true,strategy.type=RollingUpdate",
-		"unauthenticated ingress":  "ingress.enabled=true",
-		"public without OAuth":     "appMode=public,auth.baseURL=https://learn.example.com",
-		"public over HTTP":         "appMode=public,auth.existingSecret=github-auth",
+		"missing database host":     "database.mode=parameters",
+		"maintenance database":      "database.mode=parameters,database.host=db.internal,database.name=postgres",
+		"ephemeral files":           "storage.provider=filesystem",
+		"conflicting claims":        "storage.provider=filesystem,storage.filesystem.persistence.create=true,storage.filesystem.persistence.existingClaim=already-exists",
+		"missing bucket":            "storage.provider=gcs,storage.gcs.settingsSecret=",
+		"missing identity provider": "storage.gcs.workloadIdentity.enabled=true",
+		"conflicting identity":      "storage.gcs.workloadIdentity.enabled=true,storage.gcs.workloadIdentity.provider=projects/123456/locations/global/workloadIdentityPools/test-pool/providers/kubernetes,storage.gcs.credentialsSecret=user-credentials",
+		"invalid identity provider": "storage.gcs.workloadIdentity.provider=https://untrusted.example",
+		"invalid provider":          "storage.provider=unknown",
+		"invalid TLS":               "database.sslMode=bogus",
+		"invalid database port":     "database.port=70000",
+		"missing reused account":    "serviceAccount.create=false",
+		"invalid Google account":    "serviceAccount.gcpServiceAccount=invalid",
+		"unmanaged Google link":     "serviceAccount.create=false,serviceAccount.name=external,serviceAccount.gcpServiceAccount=learning@test-project.iam.gserviceaccount.com",
+		"multiple writers":          "storage.provider=filesystem,storage.filesystem.persistence.create=true,replicaCount=2",
+		"overlapping disk rollout":  "storage.provider=filesystem,storage.filesystem.persistence.create=true,strategy.type=RollingUpdate",
+			"ingress without login":    "ingress.enabled=true",
+		"public without OAuth":      "appMode=public,auth.baseURL=https://learn.example.com",
+		"public over HTTP":          "appMode=public,auth.existingSecret=github-auth",
 	}
 	for name, setting := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -153,6 +159,32 @@ func TestInvalidChartSettingsFail(t *testing.T) {
 				t.Fatal("invalid settings rendered successfully")
 			}
 		})
+	}
+}
+
+func TestServiceAccountWorkloadIdentityLink(t *testing.T) {
+	account := "learning@test-project.iam.gserviceaccount.com"
+	docs, out, err := render(t, "--set-string", "serviceAccount.gcpServiceAccount="+account,
+		"--set-string", `serviceAccount.annotations.iam\.gke\.io/gcp-service-account=`+account,
+		"--set-string", "serviceAccount.name=learning-identity", "--set-string", "serviceAccount.annotations.owner=learning-team")
+	if err != nil {
+		t.Fatal(out)
+	}
+	metadata := docs["ServiceAccount"]["metadata"].(map[string]any)
+	annotations := metadata["annotations"].(map[string]any)
+	if annotations["iam.gke.io/gcp-service-account"] != account || annotations["owner"] != "learning-team" {
+		t.Fatal("Google identity annotation or existing annotation missing")
+	}
+	if metadata["name"] != "learning-identity" || pod(docs)["serviceAccountName"] != metadata["name"] {
+		t.Fatal("app must use the annotated Kubernetes service account")
+	}
+	if pod(docs)["automountServiceAccountToken"] != false {
+		t.Fatal("linking Google identity must not enable automatic Kubernetes API token mounting")
+	}
+	_, _, err = render(t, "--set-string", "serviceAccount.gcpServiceAccount="+account,
+		"--set-string", `serviceAccount.annotations.iam\.gke\.io/gcp-service-account=different@test-project.iam.gserviceaccount.com`)
+	if err == nil {
+		t.Fatal("conflicting identity assignments must fail instead of selecting one silently")
 	}
 }
 
@@ -187,6 +219,69 @@ func TestGitHubCredentialsAndPublicIngress(t *testing.T) {
 	}
 	if len(found) != 3 {
 		t.Fatal("OAuth Secret references missing")
+	}
+}
+
+func TestNGINXIngressUsesOAuthHostAndACMETLS(t *testing.T) {
+	docs, out, err := render(t, "-f", "../../charts/romanian/values-ingress-nginx.yaml",
+		"--set-string", "auth.baseURL=https://learn.example.com", "--set", "service.port=8090")
+	if err != nil {
+		t.Fatal(out)
+	}
+	ingress := docs["Ingress"]
+	annotations := ingress["metadata"].(map[string]any)["annotations"].(map[string]any)
+	if annotations["kubernetes.io/tls-acme"] != "true" || annotations["nginx.ingress.kubernetes.io/ssl-redirect"] != "true" {
+		t.Fatal("automatic certificates and HTTPS redirect must be enabled")
+	}
+	if annotations["nginx.ingress.kubernetes.io/proxy-body-size"] != "25m" ||
+		annotations["nginx.ingress.kubernetes.io/proxy-read-timeout"] != "180" ||
+		annotations["nginx.ingress.kubernetes.io/proxy-send-timeout"] != "180" {
+		t.Fatal("ingress must allow course uploads and the two-stage generation deadline")
+	}
+	spec := ingress["spec"].(map[string]any)
+	rule := spec["rules"].([]any)[0].(map[string]any)
+	tls := spec["tls"].([]any)[0].(map[string]any)
+	if spec["ingressClassName"] != "nginx" || rule["host"] != "learn.example.com" ||
+		tls["hosts"].([]any)[0] != rule["host"] || tls["secretName"] != "romana-learning-tls" {
+		t.Fatal("ingress routing and certificate must use the OAuth hostname")
+	}
+	path := rule["http"].(map[string]any)["paths"].([]any)[0].(map[string]any)
+	backend := path["backend"].(map[string]any)["service"].(map[string]any)
+	service := docs["Service"]
+	port := service["spec"].(map[string]any)["ports"].([]any)[0].(map[string]any)
+	if path["path"] != "/" || path["pathType"] != "Prefix" ||
+		backend["name"] != service["metadata"].(map[string]any)["name"] ||
+		backend["port"].(map[string]any)["name"] != port["name"] || port["port"] != 8090 {
+		t.Fatal("ingress must route all paths to the application's configured Service port")
+	}
+	if docs["Certificate"] != nil || docs["ClusterIssuer"] != nil || docs["Secret"] != nil {
+		t.Fatal("existing cert-manager must manage certificates and issuer credentials")
+	}
+}
+
+func TestIngressRejectsBrokenOAuthAndTLSRouting(t *testing.T) {
+	settings := map[string]string{
+		"different OAuth host": "ingress.host=other.example.com",
+		"different TLS host":   "ingress.tls[0].hosts[0]=other.example.com",
+		"missing TLS secret":   "ingress.tls[0].secretName=",
+		"origin with path":     "auth.baseURL=https://learn.example.com/practice",
+		"origin with query":    "auth.baseURL=https://learn.example.com?callback=bad",
+		"origin with user":     "auth.baseURL=https://user@learn.example.com",
+		"origin with port":     "auth.baseURL=https://learn.example.com:8443",
+	}
+	for name, setting := range settings {
+		t.Run(name, func(t *testing.T) {
+			_, _, err := render(t, "-f", "../../charts/romanian/values-ingress-nginx.yaml",
+				"--set-string", "auth.baseURL=https://learn.example.com", "--set-string", setting)
+			if err == nil {
+				t.Fatal("broken ingress settings rendered successfully")
+			}
+		})
+	}
+	_, _, err := render(t, "--set", "appMode=public,auth.existingSecret=github-auth,auth.baseURL=https://learn.example.com,ingress.enabled=true",
+		"--set-string", `ingress.annotations.kubernetes\.io/tls-acme=true`)
+	if err == nil {
+		t.Fatal("ACME without a TLS certificate Secret must fail")
 	}
 }
 
@@ -234,7 +329,7 @@ func TestGenerationCredentialsOnlyUseExistingSecret(t *testing.T) {
 }
 
 func TestMicroK8sProfileUsesBundledMinIO(t *testing.T) {
-	docs, out, err := render(t, "-f", "../../charts/romanian/values-microk8s.yaml")
+	docs, out, err := render(t, "-f", "../../charts/romanian/values-microk8s.yaml", "-f", "../../charts/romanian/values-minio.yaml")
 	if err != nil {
 		t.Fatal(out)
 	}
@@ -267,5 +362,43 @@ func TestMicroK8sProfileUsesBundledMinIO(t *testing.T) {
 				t.Fatal("Invalid object storage configuration rendered")
 			}
 		})
+	}
+}
+
+func TestMicroK8sUsesProjectedWorkloadIdentity(t *testing.T) {
+	provider := "projects/123456/locations/global/workloadIdentityPools/learning/providers/kubernetes"
+	docs, out, err := render(t, "-f", "../../charts/romanian/values-microk8s.yaml", "--set-string", "storage.gcs.workloadIdentity.provider="+provider)
+	if err != nil {
+		t.Fatal(out)
+	}
+	data := docs["ConfigMap"]["data"].(map[string]any)
+	if data["COURSE_STORAGE_PROVIDER"] != "gcs" || data["COURSE_STORAGE_BUCKET"] != nil || data["GOOGLE_CLOUD_PROJECT"] != nil {
+		t.Fatal("Google storage must be default with deployment identifiers in Secret references")
+	}
+	if docs["Secret"] != nil || docs["PersistentVolumeClaim"] != nil || strings.Contains(out, "chart: minio") {
+		t.Fatal("GCS profile must not render credentials or provision MinIO")
+	}
+	p := pod(docs)
+	if p["automountServiceAccountToken"] != false || p["serviceAccountName"] != "check-romanian" {
+		t.Fatal("unrestricted Kubernetes API token must not be automounted")
+	}
+	volumes := map[string]map[string]any{}
+	for _, v := range p["volumes"].([]any) {
+		volume := v.(map[string]any)
+		volumes[volume["name"].(string)] = volume
+	}
+	projection := volumes["workload-token"]["projected"].(map[string]any)
+	token := projection["sources"].([]any)[0].(map[string]any)["serviceAccountToken"].(map[string]any)
+	if token["audience"] != "https://iam.googleapis.com/"+provider || token["expirationSeconds"] != 3600 || token["path"] != "token" {
+		t.Fatal("token must expire and be scoped to the configured Google provider")
+	}
+	secret := volumes["workload-identity"]["secret"].(map[string]any)
+	if secret["secretName"] != "google-workload-identity" {
+		t.Fatal("federation configuration must reference its external Secret")
+	}
+	encoded, _ := json.Marshal(p)
+	if !bytes.Contains(encoded, []byte("/var/run/secrets/google")) || !bytes.Contains(encoded, []byte("/etc/workload-identity")) ||
+		data["GOOGLE_APPLICATION_CREDENTIALS"] != "/etc/workload-identity/credentials.json" {
+		t.Fatal("projected token and ADC configuration must be accessible to the SDK")
 	}
 }

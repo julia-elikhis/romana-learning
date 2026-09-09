@@ -23,13 +23,17 @@ data:
   COURSE_STORAGE_PATH: {{ .Values.storage.filesystem.mountPath | quote }}
   {{- end }}
   {{- if eq .Values.storage.provider "gcs" }}
+  {{- if not .Values.storage.gcs.settingsSecret }}
   COURSE_STORAGE_BUCKET: {{ .Values.storage.gcs.bucket | quote }}
   COURSE_STORAGE_PREFIX: {{ .Values.storage.gcs.prefix | quote }}
   {{- with .Values.storage.gcs.project }}
   GOOGLE_CLOUD_PROJECT: {{ . | quote }}
   {{- end }}
+  {{- end }}
   {{- if .Values.storage.gcs.credentialsSecret }}
   GOOGLE_APPLICATION_CREDENTIALS: "/etc/google/credentials.json"
+  {{- else if .Values.storage.gcs.workloadIdentity.enabled }}
+  GOOGLE_APPLICATION_CREDENTIALS: "/etc/workload-identity/credentials.json"
   {{- end }}
   {{- end }}
   {{- if eq .Values.storage.provider "s3" }}

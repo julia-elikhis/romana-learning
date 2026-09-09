@@ -16,12 +16,16 @@ spec:
   {{- with .Values.ingress.className }}
   ingressClassName: {{ . | quote }}
   {{- end }}
-  {{- with .Values.ingress.tls }}
+  {{- if .Values.ingress.tls }}
   tls:
-    {{- toYaml . | nindent 4 }}
+    {{- range .Values.ingress.tls }}
+    - secretName: {{ .secretName | quote }}
+      hosts:
+        {{- default (list (include "romanian.ingressHost" $)) .hosts | toYaml | nindent 8 }}
+    {{- end }}
   {{- end }}
   rules:
-    - host: {{ .Values.ingress.host | quote }}
+    - host: {{ include "romanian.ingressHost" . | quote }}
       http:
         paths:
           - path: /

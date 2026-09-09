@@ -1,4 +1,4 @@
-# Local MicroK8s test profile. Database and Secrets are supplied by the test harness.
+# MicroK8s with the default Google bucket. Use values-minio.yaml for local object storage.
 image:
   repository: romanian
   tag: microk8s
@@ -10,15 +10,13 @@ database:
   sslMode: disable
   existingSecret: test-database
 storage:
-  provider: s3
-  s3:
-    bucket: courses
-    prefix: courses/
-    existingSecret: test-minio
-    accessKeyKey: rootUser
-    secretKeyKey: rootPassword
+  provider: gcs
+  gcs:
+    settingsSecret: google-storage
+    workloadIdentity:
+      enabled: true
 minio:
-  enabled: true
+  enabled: false
   existingSecret: test-minio
   persistence:
     storageClass: microk8s-hostpath

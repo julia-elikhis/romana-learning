@@ -6,3 +6,13 @@ secrets/
 credentials*.json
 *.pem
 .DS_Store
+.sops.yaml
+*.enc.json
+*.enc.yaml
+*.enc.yml
+secrets.*.yaml
+secrets.*.yml
+*.agekey
+keys.txt
+application_default_credentials.json
+*service-account*.json

@@ -1,0 +1,20 @@
+# Runtime Secrets must already exist in the production release namespace.
+# The production renderer supplies identifiers from SOPS, plus the ingress overlay.
+image:
+  repository: elikhis/romana-learning
+  tag: "20260909-1@sha256:3d5a666f305c94fd527cc11d1044e9653fd67dee18a18e84bf8d0ab7a617c5c9"
+appMode: public
+auth:
+  existingSecret: github-auth
+database:
+  mode: parameters
+  existingSecret: romanian-database
+generation:
+  existingSecret: romanian-generation
+storage:
+  provider: gcs
+  gcs:
+    settingsSecret: google-storage
+    workloadIdentity:
+      # GKE supplies credentials through its metadata server.
+      enabled: false

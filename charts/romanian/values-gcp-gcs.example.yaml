@@ -14,6 +14,7 @@ database:
 storage:
   provider: gcs
   gcs:
+    settingsSecret: "" # Or keep identifiers in an existing runtime Secret.
     project: YOUR_PROJECT
     bucket: YOUR_EXISTING_BUCKET
     prefix: romanian/courses/

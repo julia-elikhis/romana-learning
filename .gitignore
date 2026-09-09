@@ -21,3 +21,15 @@ TECH_PLAN.md
 
 __pycache__/
 *.pyc
+
+# Encrypted YAML settings and the public .sops.yaml rule may be committed.
+config/secrets.*.json
+config/secrets.*.yaml
+config/secrets.*.yml
+!config/secrets.*.enc.yaml
+!config/secrets.*.example.yaml
+*.agekey
+keys.txt
+application_default_credentials.json
+*service-account*.json
+.sops-*.enc.*

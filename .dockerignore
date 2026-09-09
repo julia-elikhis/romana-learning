@@ -10,3 +10,11 @@ secrets/
 credentials*.json
 *.private.yaml
 *.private.yml
+.sops.yaml
+config/secrets.*.json
+config/secrets.*.yaml
+config/secrets.*.yml
+*.agekey
+keys.txt
+application_default_credentials.json
+*service-account*.json

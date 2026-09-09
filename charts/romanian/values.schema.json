@@ -10,7 +10,7 @@
   "properties": {
     "replicaCount": {
       "type": "integer",
-      "minimum": 1
+      "minimum": 0
     },
     "appMode": {
       "type": "string",
@@ -231,6 +231,30 @@
             "credentialsKey": {
               "type": "string",
               "minLength": 1
+            },
+            "settingsSecret": {
+              "type": "string"
+            },
+            "workloadIdentity": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "enabled",
+                "provider",
+                "credentialsSecret"
+              ],
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "provider": {
+                  "type": "string",
+                  "pattern": "^$|^projects/[0-9]+/locations/global/workloadIdentityPools/[a-z0-9-]+/providers/[a-z0-9-]+$"
+                },
+                "credentialsSecret": {
+                  "type": "string"
+                }
+              }
             }
           }
         },
@@ -284,6 +308,10 @@
         },
         "automountServiceAccountToken": {
           "type": "boolean"
+        },
+        "gcpServiceAccount": {
+          "type": "string",
+          "pattern": "^$|^[^@\\s]+@[^@\\s]+\\.iam\\.gserviceaccount\\.com$"
         }
       }
     },
@@ -310,8 +338,7 @@
           }
         },
         "host": {
-          "type": "string",
-          "minLength": 1
+          "type": "string"
         },
         "tls": {
           "type": "array",
@@ -332,8 +359,7 @@
               }
             },
             "required": [
-              "secretName",
-              "hosts"
+              "secretName"
             ]
           }
         }

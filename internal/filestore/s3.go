@@ -63,3 +63,7 @@ func (s *S3) Open(ctx context.Context, key string) (io.ReadCloser, error) {
 	return object, nil
 }
 func (s *S3) Close() error { return nil }
+
+func (s *S3) remove(ctx context.Context, key string) error {
+	return s.client.RemoveObject(ctx, s.bucket, s.prefix+key, minio.RemoveObjectOptions{})
+}
