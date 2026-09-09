@@ -1,0 +1,143 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "romanian.name" . }}
+  labels:
+    {{- include "romanian.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  strategy:
+    type: {{ .Values.strategy.type }}
+  selector:
+    matchLabels:
+      {{- include "romanian.selector" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "romanian.selector" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "romanian.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.serviceAccount.automountServiceAccountToken }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: app
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: {{ include "romanian.name" . }}
+          env:
+            {{- if eq .Values.database.mode "url" }}
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "database.existingSecret is required" .Values.database.existingSecret }}
+                  key: {{ .Values.database.urlKey }}
+            {{- else }}
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.database.existingSecret }}
+                  key: {{ .Values.database.usernameKey }}
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.database.existingSecret }}
+                  key: {{ .Values.database.passwordKey }}
+            {{- end }}
+          {{- if or (eq .Values.storage.provider "filesystem") (and (eq .Values.storage.provider "gcs") .Values.storage.gcs.credentialsSecret) .Values.database.tls.existingSecret }}
+          volumeMounts:
+            {{- if eq .Values.storage.provider "filesystem" }}
+            - name: courses
+              mountPath: {{ .Values.storage.filesystem.mountPath }}
+            {{- end }}
+            {{- if and (eq .Values.storage.provider "gcs") .Values.storage.gcs.credentialsSecret }}
+            - name: google-credentials
+              mountPath: /etc/google
+              readOnly: true
+            {{- end }}
+            {{- if .Values.database.tls.existingSecret }}
+            - name: postgres-ca
+              mountPath: /etc/postgres
+              readOnly: true
+            {{- end }}
+          {{- end }}
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            failureThreshold: 45
+            periodSeconds: 2
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      {{- if or (eq .Values.storage.provider "filesystem") (and (eq .Values.storage.provider "gcs") .Values.storage.gcs.credentialsSecret) .Values.database.tls.existingSecret }}
+      volumes:
+        {{- if eq .Values.storage.provider "filesystem" }}
+        - name: courses
+          persistentVolumeClaim:
+            claimName: {{ include "romanian.claimName" . }}
+        {{- end }}
+        {{- if and (eq .Values.storage.provider "gcs") .Values.storage.gcs.credentialsSecret }}
+        - name: google-credentials
+          secret:
+            secretName: {{ .Values.storage.gcs.credentialsSecret }}
+            defaultMode: 0440
+            items:
+              - key: {{ .Values.storage.gcs.credentialsKey }}
+                path: credentials.json
+        {{- end }}
+        {{- if .Values.database.tls.existingSecret }}
+        - name: postgres-ca
+          secret:
+            secretName: {{ .Values.database.tls.existingSecret }}
+            defaultMode: 0444
+            items:
+              - key: {{ .Values.database.tls.caKey }}
+                path: ca.crt
+        {{- end }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

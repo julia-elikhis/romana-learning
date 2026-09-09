@@ -1,0 +1,15 @@
+.env
+.env.*
+!.env.example
+node_modules/
+web/dist/
+bin/
+.DS_Store
+*.log
+web/test-results/
+web/playwright-report/
+*.private.yaml
+*.private.yml
+secrets/
+credentials*.json
+*.pem

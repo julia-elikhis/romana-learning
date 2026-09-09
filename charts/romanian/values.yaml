@@ -1,0 +1,78 @@
+replicaCount: 1
+# Recreate avoids overlapping writers/volume attachments for a single-node disk.
+strategy:
+  type: Recreate
+image:
+  repository: romanian
+  tag: local
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+# This scaffold has one local learner. Public authentication is not implemented.
+appMode: local
+database:
+  # url: whole connection URL from a Secret (compatible with local mode).
+  # parameters: explicit host/database/TLS settings, username/password in a Secret.
+  mode: url
+  existingSecret: romanian-database
+  urlKey: DATABASE_URL
+  host: ""
+  port: 5432
+  name: romanian
+  usernameKey: username
+  passwordKey: password
+  sslMode: verify-full
+  tls:
+    existingSecret: ""
+    caKey: ca.crt
+
+# Runtime wiring for the upcoming course library. Upload APIs are not implemented.
+storage:
+  provider: disabled # disabled | filesystem | gcs
+  filesystem:
+    mountPath: /data/courses
+    persistence:
+      existingClaim: ""
+      create: false
+      size: 10Gi
+      # null: cluster default; "": no dynamic provisioning; otherwise class name.
+      storageClass: null
+      accessModes: [ReadWriteOnce]
+      # Retain a chart-created claim on uninstall. Backups are managed separately.
+      keep: true
+  gcs:
+    bucket: ""
+    prefix: courses/
+    project: ""
+    # Leave blank to use Application Default Credentials / Workload Identity.
+    credentialsSecret: ""
+    credentialsKey: credentials.json
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+  automountServiceAccountToken: false
+
+podAnnotations: {}
+
+service:
+  port: 8080
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  host: romanian.example.com
+  tls: []
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 64Mi
+  limits:
+    cpu: "1"
+    memory: 256Mi
+nodeSelector: {}
+tolerations: []
+affinity: {}

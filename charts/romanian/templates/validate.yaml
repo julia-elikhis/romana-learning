@@ -1,0 +1,24 @@
+{{- if eq .Values.database.mode "parameters" }}
+{{- $_ := required "database.host is required in parameters mode" .Values.database.host }}
+{{- if or (eq .Values.database.name "postgres") (hasPrefix "template" .Values.database.name) }}
+{{- fail "Select the application's dedicated database, not a PostgreSQL maintenance/template database" }}
+{{- end }}
+{{- end }}
+{{- if eq .Values.storage.provider "filesystem" }}
+{{- $p := .Values.storage.filesystem.persistence }}
+{{- if and $p.create $p.existingClaim }}
+{{- fail "Choose either an existing course PVC or creation of a new claim, not both" }}
+{{- end }}
+{{- if and (not $p.create) (not $p.existingClaim) }}
+{{- fail "Filesystem storage requires persistence.existingClaim or persistence.create=true" }}
+{{- end }}
+{{- if and (gt (int .Values.replicaCount) 1) (not (has "ReadWriteMany" $p.accessModes)) }}
+{{- fail "Multiple filesystem replicas require a ReadWriteMany claim; keep replicaCount=1 for node disks" }}
+{{- end }}
+{{- if and (eq .Values.strategy.type "RollingUpdate") (not (has "ReadWriteMany" $p.accessModes)) }}
+{{- fail "Use Recreate strategy with a single-writer course disk" }}
+{{- end }}
+{{- end }}
+{{- if eq .Values.storage.provider "gcs" }}
+{{- $_ := required "storage.gcs.bucket is required for GCS" .Values.storage.gcs.bucket }}
+{{- end }}

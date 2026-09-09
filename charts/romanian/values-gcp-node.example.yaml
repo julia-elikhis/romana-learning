@@ -1,0 +1,31 @@
+# Example only: replace these placeholders before deployment.
+# Requires an existing Kubernetes cluster/node and an existing PVC in the namespace.
+image:
+  repository: europe-west1-docker.pkg.dev/YOUR_PROJECT/YOUR_REPOSITORY/romanian
+  tag: "0.2.0"
+
+nodeSelector:
+  kubernetes.io/hostname: YOUR_EXISTING_NODE
+
+database:
+  mode: parameters
+  host: postgres.internal.example
+  port: 5432
+  name: romanian
+  existingSecret: romanian-database
+  usernameKey: username
+  passwordKey: password
+  sslMode: verify-full
+  tls:
+    existingSecret: romanian-postgres-ca
+    caKey: ca.crt
+
+storage:
+  provider: filesystem
+  filesystem:
+    persistence:
+      existingClaim: romanian-course-files
+      create: false
+
+ingress:
+  enabled: false

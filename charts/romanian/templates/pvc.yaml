@@ -1,0 +1,21 @@
+{{- if and (eq .Values.storage.provider "filesystem") .Values.storage.filesystem.persistence.create }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "romanian.claimName" . }}
+  labels:
+    {{- include "romanian.labels" . | nindent 4 }}
+  {{- if .Values.storage.filesystem.persistence.keep }}
+  annotations:
+    helm.sh/resource-policy: keep
+  {{- end }}
+spec:
+  accessModes:
+    {{- toYaml .Values.storage.filesystem.persistence.accessModes | nindent 4 }}
+  {{- if ne .Values.storage.filesystem.persistence.storageClass nil }}
+  storageClassName: {{ .Values.storage.filesystem.persistence.storageClass | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.storage.filesystem.persistence.size }}
+{{- end }}

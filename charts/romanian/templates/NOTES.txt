@@ -1,0 +1,24 @@
+This release connects to an existing PostgreSQL instance.
+{{ if eq .Values.database.mode "parameters" -}}
+Database: {{ .Values.database.name }} at {{ .Values.database.host }}:{{ .Values.database.port }}
+Credentials Secret: {{ .Values.database.existingSecret }}
+Keys: {{ .Values.database.usernameKey }}, {{ .Values.database.passwordKey }}
+{{ else -}}
+Connection URL Secret: {{ .Values.database.existingSecret }} / {{ .Values.database.urlKey }}
+{{ end }}
+Course storage wiring: {{ .Values.storage.provider }}
+{{ if eq .Values.storage.provider "filesystem" -}}
+PVC: {{ include "romanian.claimName" . }} mounted at {{ .Values.storage.filesystem.mountPath }}
+{{ else if eq .Values.storage.provider "gcs" -}}
+Bucket: {{ .Values.storage.gcs.bucket }}; prefix: {{ .Values.storage.gcs.prefix }}
+{{ end }}
+Course-library upload APIs and the GCS application adapter are not implemented yet.
+
+The current app is a single-user development scaffold, with no public authentication.
+Access a test-cluster deployment through a local port forward:
+
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "romanian.name" . }} 8080:{{ .Values.service.port }}
+
+Then open http://localhost:8080.
+No PostgreSQL instance, logical database, bucket, node, or IAM binding is created.
+Create the app's dedicated database and arrange network access before installation.

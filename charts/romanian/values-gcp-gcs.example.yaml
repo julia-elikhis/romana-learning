@@ -1,0 +1,29 @@
+# Alternative to disk storage. No PVC is created or mounted.
+# Requires an existing bucket and Google IAM authorization for this workload.
+image:
+  repository: europe-west1-docker.pkg.dev/YOUR_PROJECT/YOUR_REPOSITORY/romanian
+  tag: "0.2.0"
+
+database:
+  mode: parameters
+  host: postgres.internal.example
+  name: romanian
+  existingSecret: romanian-database
+  sslMode: verify-full
+
+storage:
+  provider: gcs
+  gcs:
+    project: YOUR_PROJECT
+    bucket: YOUR_EXISTING_BUCKET
+    prefix: romanian/courses/
+
+# With GKE Workload Identity, link this KSA to an authorized Google service account,
+# or grant the KSA principal access directly and omit the annotation.
+serviceAccount:
+  create: true
+  annotations:
+    iam.gke.io/gcp-service-account: romanian@YOUR_PROJECT.iam.gserviceaccount.com
+
+ingress:
+  enabled: false
