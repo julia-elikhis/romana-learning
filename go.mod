@@ -2,7 +2,7 @@ module github.com/julia-elikhis/romana-learning
 
 go 1.26
 
-require github.com/jackc/pgx/v5 v5.7.6
+require github.com/jackc/pgx/v5 v5.9.2
 
 require gopkg.in/yaml.v3 v3.0.1
 
