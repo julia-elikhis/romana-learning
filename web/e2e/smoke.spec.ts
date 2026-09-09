@@ -1,29 +1,31 @@
-import { test, expect } from '@playwright/test';
-import { execFileSync } from 'node:child_process';
+import {test,expect} from './fixtures';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 
-test('practice saves progress and survives a browser reload',async({page,request},testInfo)=>{
- const ids:string[]=[];
- const before=await (await request.get('/api/progress')).json();
- const errors:string[]=[];
- page.on('pageerror',error=>errors.push(error.message));
- page.on('request',r=>{if(r.url().endsWith('/api/attempts')&&r.method()==='POST')ids.push(r.postDataJSON().id)});
- try{
-  await page.goto('/');
-  await expect(page.getByRole('heading',{name:'Make yourself at home'})).toBeVisible();
-  await page.getByRole('button',{name:'Start a little practice'}).click();
-  await page.getByRole('button',{name:'case',exact:true}).click();
-  await page.getByRole('button',{name:'Check answer'}).click();
-  await expect(page.getByText('Saved to Postgres',{exact:true})).toBeVisible();
-  await expect(page.getByText('Nicely done.',{exact:true})).toBeVisible();
-  await page.reload();
-  await expect(page.locator('.stats strong').first()).toHaveText(String(before.attempts+1));
-  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);
-  expect(errors).toEqual([]);
-  await page.screenshot({path:`/private/tmp/romanian-${testInfo.project.name}.png`,fullPage:true});
- }finally{
-  for(const id of new Set(ids)){
-   if(!/^[a-f0-9-]{36}$/.test(id))throw new Error('Unexpected test attempt ID');
-   execFileSync('docker',['compose','exec','-T','postgres','psql','-U','romanian','-d','romanian','-v','ON_ERROR_STOP=1','-c',`DELETE FROM attempts WHERE id = '${id}'`],{cwd:'..'});
-  }
- }
+test('public practice works without saving history or allowing uploads',async({page,request},testInfo)=>{
+ const uploaded=await request.post('/api/materials',{multipart:{title:'Library test '+crypto.randomUUID(),kind:'notes',file:{name:'lesson.txt',mimeType:'text/plain',buffer:Buffer.from('Eu sunt acasă în fiecare zi.')}}});
+ expect(uploaded.ok()).toBe(true);const {id}=await uploaded.json();
+ expect((await request.patch('/api/materials/'+id,{data:{text:'Eu sunt acasă în fiecare zi.',reviewed:true}})).ok()).toBe(true);
+ expect((await request.post('/api/materials/'+id+'/generate',{data:{count:5,mode:'local'}})).ok()).toBe(true);
+ const {exercises}=await(await request.get('/api/materials/'+id)).json();
+ expect((await request.post('/api/drafts/'+exercises[0].id+'/status',{data:{status:'published',reviewed:true}})).ok()).toBe(true);
+ await page.goto('/');await page.getByRole('button',{name:'Sign out',exact:true}).click();
+ await expect(page.getByText('Practice freely. Anonymous answers are not saved.',{exact:true})).toBeVisible();
+ await page.getByRole('button',{name:'Course library',exact:true}).click();
+ await expect(page.getByRole('heading',{name:'Make room for your lessons.'})).toBeVisible();
+ await expect(page.getByLabel('Document',{exact:true})).toHaveCount(0);
+ expect((await request.post('/api/materials',{data:{}})).status()).toBe(401);
+ expect((await request.post('/api/materials/'+id+'/generate',{data:{count:5,mode:'local'}})).status()).toBe(401);
+ expect((await request.get('/api/history')).status()).toBe(401);
+ await page.getByRole('button',{name:'Practice',exact:true}).click();
+ await page.getByRole('button',{name:'Start a little practice'}).click();
+ const typed=page.getByLabel('Your answer',{exact:true});
+ if(await typed.count())await typed.fill('sunt');else await page.locator('.options button').first().click();
+ const answer=page.waitForResponse(r=>r.url().endsWith('/api/attempts')&&r.request().method()==='POST');
+ await page.getByRole('button',{name:'Check answer'}).click();expect((await(await answer).json()).saved).toBe(false);
+ await expect(page.getByText('Anonymous practice · answer not saved',{exact:true})).toBeVisible();
+ const progress=await(await request.get('/api/progress')).json();expect(progress.tracked).toBe(false);expect(progress.attempts).toBe(0);
+ await page.reload();await expect(page.getByText('Practice freely. Anonymous answers are not saved.',{exact:true})).toBeVisible();
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);
+ await page.screenshot({path:join(tmpdir(),`romana-practice-${testInfo.project.name}.png`),fullPage:true});
 });

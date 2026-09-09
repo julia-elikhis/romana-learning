@@ -1,6 +1,6 @@
 import { defineConfig, devices } from '@playwright/test';
 export default defineConfig({
- testDir:'./e2e',workers:1,
+ testDir:'./e2e',workers:1,timeout:60000,
  use:{baseURL:'http://127.0.0.1:8080',channel:'chrome'},
  projects:[
   {name:'desktop',use:{viewport:{width:1440,height:1000}}},

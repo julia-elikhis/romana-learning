@@ -4,6 +4,12 @@
 {{- fail "Select the application's dedicated database, not a PostgreSQL maintenance/template database" }}
 {{- end }}
 {{- end }}
+{{- if or .Values.ingress.enabled (eq .Values.appMode "public") }}
+{{- $_ := required "Public deployment requires auth.existingSecret" .Values.auth.existingSecret }}
+{{- if not (hasPrefix "https://" .Values.auth.baseURL) }}
+{{- fail "Public deployment requires an HTTPS auth.baseURL" }}
+{{- end }}
+{{- end }}
 {{- if eq .Values.storage.provider "filesystem" }}
 {{- $p := .Values.storage.filesystem.persistence }}
 {{- if and $p.create $p.existingClaim }}
@@ -21,4 +27,19 @@
 {{- end }}
 {{- if eq .Values.storage.provider "gcs" }}
 {{- $_ := required "storage.gcs.bucket is required for GCS" .Values.storage.gcs.bucket }}
+{{- end }}
+
+{{- if eq .Values.storage.provider "s3" }}
+{{- $_ := required "storage.s3.bucket is required for S3" .Values.storage.s3.bucket }}
+{{- $_ := required "storage.s3.existingSecret is required for S3" .Values.storage.s3.existingSecret }}
+{{- $_ := include "romanian.s3Endpoint" . }}
+{{- end }}
+{{- if .Values.minio.enabled }}
+{{- $_ := required "minio.existingSecret is required; provide rootUser/rootPassword in a Secret" .Values.minio.existingSecret }}
+{{- if ne .Values.storage.provider "s3" }}
+{{- fail "Bundled MinIO requires storage.provider=s3" }}
+{{- end }}
+{{- if not .Values.minio.persistence.enabled }}
+{{- fail "Bundled MinIO requires persistent storage" }}
+{{- end }}
 {{- end }}

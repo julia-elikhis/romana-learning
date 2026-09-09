@@ -15,6 +15,49 @@ services:
       interval: 3s
       timeout: 3s
       retries: 20
+  minio:
+    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+    command: server /data --console-address :9001
+    environment: &minio-credentials
+      MINIO_ROOT_USER: romanian-local
+      MINIO_ROOT_PASSWORD: local-minio-development-only
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+  minio-init:
+    image: quay.io/minio/mc:RELEASE.2024-11-21T17-21-54Z
+    environment: *minio-credentials
+    entrypoint: /bin/sh
+    command:
+      - -ec
+      - |
+        mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD" >/dev/null
+        mc mb --ignore-existing local/courses
+    depends_on:
+      minio:
+        condition: service_healthy
+  migrate-files:
+    profiles: [migration]
+    image: quay.io/minio/mc:RELEASE.2024-11-21T17-21-54Z
+    environment: *minio-credentials
+    volumes:
+      - course-files:/legacy:ro
+    entrypoint: /bin/sh
+    command:
+      - -ec
+      - |
+        mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD" >/dev/null
+        mc mirror /legacy local/courses/courses
+    depends_on:
+      minio-init:
+        condition: service_completed_successfully
   app:
     build: .
     image: romanian:local
@@ -23,11 +66,23 @@ services:
       APP_MODE: local
       DATABASE_URL: postgres://romanian:local-development-only@postgres:5432/romanian?sslmode=disable
       HTTP_ADDR: 0.0.0.0:8080
+      COURSE_STORAGE_PROVIDER: s3
+      COURSE_S3_ENDPOINT: http://minio:9000
+      COURSE_STORAGE_BUCKET: courses
+      COURSE_STORAGE_PREFIX: courses/
+      COURSE_S3_REGION: us-east-1
+      COURSE_S3_ACCESS_KEY: romanian-local
+      COURSE_S3_SECRET_KEY: local-minio-development-only
+    env_file:
+      - path: .env
+        required: false
     ports:
       - "127.0.0.1:8080:8080"
     depends_on:
       postgres:
         condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8080/readyz"]
       interval: 10s
@@ -35,3 +90,5 @@ services:
       retries: 5
 volumes:
   postgres-data:
+  course-files:
+  minio-data:

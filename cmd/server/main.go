@@ -5,6 +5,8 @@ import (
 	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/julia-elikhis/romana-learning/internal/app"
 	"github.com/julia-elikhis/romana-learning/internal/config"
+	"github.com/julia-elikhis/romana-learning/internal/filestore"
+	"github.com/julia-elikhis/romana-learning/internal/materials"
 	"log"
 	"net/http"
 	"os"
@@ -14,8 +16,9 @@ import (
 )
 
 func main() {
-	if os.Getenv("APP_MODE") != "local" {
-		log.Fatal("Only APP_MODE=local is implemented; authentication is required before public deployment")
+	mode := os.Getenv("APP_MODE")
+	if mode != "local" && mode != "public" {
+		log.Fatal("APP_MODE must be local or public")
 	}
 	dbConfig, err := config.Database()
 	if err != nil {
@@ -50,12 +53,31 @@ func main() {
 		addr = "127.0.0.1:8080"
 	}
 	mux := http.NewServeMux()
-	api := app.Server{DB: db}.Routes()
+	files, err := filestore.FromEnv(context.Background())
+	if err != nil {
+		log.Fatal("Could not initialize course storage; check COURSE_STORAGE settings and credentials")
+	}
+	if files != nil {
+		defer files.Close()
+	}
+	generator, err := materials.APIFromEnv()
+	if err != nil {
+		log.Fatal("Invalid generation API configuration; check EXERCISE_API settings")
+	}
+	auth, err := app.GitHubAuthFromEnv()
+	if err != nil {
+		log.Fatal("Invalid GitHub authentication configuration; check GITHUB and APP_BASE_URL settings")
+	}
+	if mode == "public" && (auth == nil || !auth.PublicReady()) {
+		log.Fatal("Public mode requires GitHub authentication and an HTTPS APP_BASE_URL")
+	}
+	api := app.Server{DB: db, Files: files, Generator: generator, Auth: auth}.Routes()
 	mux.Handle("/api/", api)
+	mux.Handle("/auth/", api)
 	mux.Handle("/healthz", api)
 	mux.Handle("/readyz", api)
 	mux.Handle("/", http.FileServer(http.Dir("web/dist")))
-	server := &http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second}
+	server := &http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: materials.GenerationTimeout + 10*time.Second, IdleTimeout: 60 * time.Second}
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 	go func() {

@@ -6,6 +6,7 @@ metadata:
     {{- include "romanian.labels" . | nindent 4 }}
 data:
   APP_MODE: {{ .Values.appMode | quote }}
+  APP_BASE_URL: {{ .Values.auth.baseURL | quote }}
   HTTP_ADDR: "0.0.0.0:8080"
   {{- if eq .Values.database.mode "parameters" }}
   PGHOST: {{ .Values.database.host | quote }}
@@ -30,4 +31,10 @@ data:
   {{- if .Values.storage.gcs.credentialsSecret }}
   GOOGLE_APPLICATION_CREDENTIALS: "/etc/google/credentials.json"
   {{- end }}
+  {{- end }}
+  {{- if eq .Values.storage.provider "s3" }}
+  COURSE_S3_ENDPOINT: {{ include "romanian.s3Endpoint" . | quote }}
+  COURSE_STORAGE_BUCKET: {{ .Values.storage.s3.bucket | quote }}
+  COURSE_STORAGE_PREFIX: {{ .Values.storage.s3.prefix | quote }}
+  COURSE_S3_REGION: {{ .Values.storage.s3.region | quote }}
   {{- end }}

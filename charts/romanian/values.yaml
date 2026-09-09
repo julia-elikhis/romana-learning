@@ -8,8 +8,12 @@ image:
   pullPolicy: IfNotPresent
 imagePullSecrets: []
 
-# This scaffold has one local learner. Public authentication is not implemented.
+# Both modes require authentication for materials and saved history. Anonymous grading is public.
+# Public mode also requires configured GitHub OAuth and an HTTPS origin.
 appMode: local
+auth:
+  existingSecret: ""
+  baseURL: http://localhost:8080
 database:
   # url: whole connection URL from a Secret (compatible with local mode).
   # parameters: explicit host/database/TLS settings, username/password in a Secret.
@@ -26,9 +30,9 @@ database:
     existingSecret: ""
     caKey: ca.crt
 
-# Runtime wiring for the upcoming course library. Upload APIs are not implemented.
+# Original course files; metadata and exercise drafts are stored in Postgres.
 storage:
-  provider: disabled # disabled | filesystem | gcs
+  provider: disabled # disabled | filesystem | gcs | s3
   filesystem:
     mountPath: /data/courses
     persistence:
@@ -47,6 +51,50 @@ storage:
     # Leave blank to use Application Default Credentials / Workload Identity.
     credentialsSecret: ""
     credentialsKey: credentials.json
+
+  s3:
+    # Leave empty to use the bundled MinIO service when minio.enabled=true.
+    endpoint: ""
+    bucket: courses
+    prefix: courses/
+    region: us-east-1
+    existingSecret: ""
+    accessKeyKey: accessKey
+    secretKeyKey: secretKey
+
+# Optional local object store. Use an existing Secret with rootUser/rootPassword.
+minio:
+  enabled: false
+  mode: standalone
+  replicas: 1
+  existingSecret: ""
+  image:
+    repository: quay.io/minio/minio
+    tag: RELEASE.2025-09-07T16-13-09Z
+  mcImage:
+    repository: quay.io/minio/mc
+    tag: RELEASE.2024-11-21T17-21-54Z
+  users: []
+  buckets:
+    - name: courses
+      policy: none
+      purge: false
+  persistence:
+    enabled: true
+    size: 5Gi
+    annotations:
+      helm.sh/resource-policy: keep
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+
+# Existing Secret only: keep endpoint URLs and keys out of chart values.
+generation:
+  existingSecret: ""
 
 serviceAccount:
   create: true

@@ -1,0 +1,25 @@
+# Local MicroK8s test profile. Database and Secrets are supplied by the test harness.
+image:
+  repository: romanian
+  tag: microk8s
+  pullPolicy: Never
+database:
+  mode: parameters
+  host: postgres
+  name: romanian_test
+  sslMode: disable
+  existingSecret: test-database
+storage:
+  provider: s3
+  s3:
+    bucket: courses
+    prefix: courses/
+    existingSecret: test-minio
+    accessKeyKey: rootUser
+    secretKeyKey: rootPassword
+minio:
+  enabled: true
+  existingSecret: test-minio
+  persistence:
+    storageClass: microk8s-hostpath
+    size: 5Gi

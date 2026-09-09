@@ -21,3 +21,15 @@ app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
 helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | quote }}
 {{- end -}}
+
+{{- define "romanian.s3Endpoint" -}}
+{{- if .Values.storage.s3.endpoint -}}
+{{- .Values.storage.s3.endpoint -}}
+{{- else if .Values.minio.enabled -}}
+{{- $scheme := "http" -}}
+{{- if .Values.minio.tls.enabled -}}{{- $scheme = "https" -}}{{- end -}}
+{{- printf "%s://%s:%v" $scheme (include "minio.fullname" .Subcharts.minio) .Values.minio.service.port -}}
+{{- else -}}
+{{- fail "storage.s3.endpoint is required when bundled MinIO is disabled" -}}
+{{- end -}}
+{{- end -}}

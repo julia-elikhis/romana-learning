@@ -51,6 +51,59 @@ spec:
             - configMapRef:
                 name: {{ include "romanian.name" . }}
           env:
+            {{- with .Values.auth.existingSecret }}
+            {{- range $key := list "GITHUB_CLIENT_ID" "GITHUB_CLIENT_SECRET" "APP_BASE_URL" "AUTH_LEGACY_GITHUB_ID" }}
+            - name: {{ $key }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $.Values.auth.existingSecret }}
+                  key: {{ $key }}
+                  optional: {{ or (eq $key "APP_BASE_URL") (eq $key "AUTH_LEGACY_GITHUB_ID") }}
+            {{- end }}
+            {{- end }}
+            {{- if eq .Values.storage.provider "s3" }}
+            - name: COURSE_S3_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.storage.s3.existingSecret }}
+                  key: {{ .Values.storage.s3.accessKeyKey }}
+            - name: COURSE_S3_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.storage.s3.existingSecret }}
+                  key: {{ .Values.storage.s3.secretKeyKey }}
+            {{- end }}
+            {{- with .Values.generation.existingSecret }}
+            - name: EXERCISE_API_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ . }}
+                  key: EXERCISE_API_URL
+            - name: EXERCISE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ . }}
+                  key: EXERCISE_API_KEY
+                  optional: true
+            - name: EXERCISE_API_MODEL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ . }}
+                  key: EXERCISE_API_MODEL
+                  optional: true
+            - name: EXERCISE_API_EFFORT
+              valueFrom:
+                secretKeyRef:
+                  name: {{ . }}
+                  key: EXERCISE_API_EFFORT
+                  optional: true
+            - name: EXERCISE_API_EFFORT_FORMAT
+              valueFrom:
+                secretKeyRef:
+                  name: {{ . }}
+                  key: EXERCISE_API_EFFORT_FORMAT
+                  optional: true
+            {{- end }}
             {{- if eq .Values.database.mode "url" }}
             - name: DATABASE_URL
               valueFrom:
@@ -69,8 +122,9 @@ spec:
                   name: {{ .Values.database.existingSecret }}
                   key: {{ .Values.database.passwordKey }}
             {{- end }}
-          {{- if or (eq .Values.storage.provider "filesystem") (and (eq .Values.storage.provider "gcs") .Values.storage.gcs.credentialsSecret) .Values.database.tls.existingSecret }}
           volumeMounts:
+            - name: temporary
+              mountPath: /tmp
             {{- if eq .Values.storage.provider "filesystem" }}
             - name: courses
               mountPath: {{ .Values.storage.filesystem.mountPath }}
@@ -85,7 +139,6 @@ spec:
               mountPath: /etc/postgres
               readOnly: true
             {{- end }}
-          {{- end }}
           startupProbe:
             httpGet:
               path: /healthz
@@ -103,8 +156,10 @@ spec:
               port: http
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
-      {{- if or (eq .Values.storage.provider "filesystem") (and (eq .Values.storage.provider "gcs") .Values.storage.gcs.credentialsSecret) .Values.database.tls.existingSecret }}
       volumes:
+        - name: temporary
+          emptyDir:
+            sizeLimit: 128Mi
         {{- if eq .Values.storage.provider "filesystem" }}
         - name: courses
           persistentVolumeClaim:
@@ -128,7 +183,6 @@ spec:
               - key: {{ .Values.database.tls.caKey }}
                 path: ca.crt
         {{- end }}
-      {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

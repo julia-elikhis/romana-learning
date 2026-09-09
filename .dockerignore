@@ -4,3 +4,9 @@ web/dist
 bin
 .env*
 *.md
+
+data/
+secrets/
+credentials*.json
+*.private.yaml
+*.private.yml

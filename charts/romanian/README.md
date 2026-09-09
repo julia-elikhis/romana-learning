@@ -1,6 +1,6 @@
 # Existing Google Cloud infrastructure
 
-This chart installs the app into an existing Kubernetes cluster. It uses your existing PostgreSQL instance and either an existing course-files PVC or a Cloud Storage bucket. It creates no VM, node pool, Postgres server, database, bucket, or IAM binding.
+This chart installs the app into an existing Kubernetes cluster. It uses an existing PostgreSQL instance and configurable course storage: an existing PVC, Google Cloud Storage, an S3-compatible service, or the optional MinIO dependency. Enabling MinIO provisions its storage and configured buckets. The chart creates no VM, node pool, Postgres server, logical database, or IAM binding.
 
 If the existing node is a standalone Compute Engine VM without Kubernetes, use Docker Compose/container deployment there instead. Helm requires Kubernetes; it does not install Kubernetes onto a VM.
 
@@ -8,9 +8,12 @@ If the existing node is a standalone Compute Engine VM without Kubernetes, use D
 
 - `values-gcp-node.example.yaml`: existing node, existing course-files PVC, and external Postgres.
 - `values-gcp-gcs.example.yaml`: existing bucket with Google identity, and external Postgres. Set node placement if needed.
+- `values-microk8s.yaml`: bundled MinIO with MicroK8s hostpath storage. The local test harness supplies PostgreSQL and Secrets.
 - `values.yaml`: all available options and a minimal profile using a connection URL Secret.
 
 Copy a profile to a private deployment values file and replace its placeholders. Use the actual image registry/tag built from this source; placeholder images are not published. Build the container image for the target node architecture.
+
+The pinned dependency archive is included. Run `helm dependency build charts/romanian` to restore it from `Chart.lock` if needed.
 
 ```sh
 helm lint charts/romanian -f /path/to/private-values.yaml
@@ -87,11 +90,80 @@ On GKE, configure Workload Identity on the existing cluster/node pool and author
 
 For a non-GKE cluster, use its configured Google federation/ADC setup or reference an existing credential-file Secret through `storage.gcs.credentialsSecret` and `credentialsKey`. The chart mounts it read-only and sets `GOOGLE_APPLICATION_CREDENTIALS`. You can reuse an existing Kubernetes service account with `serviceAccount.create: false` and `serviceAccount.name`.
 
-## Current scope
+## Course files in MinIO or another S3-compatible service
 
-Database parameters are consumed by the Go server. Storage settings select the course-file location and its Google identity or volume mount. Configuring storage does not automatically import documents.
+For an existing service, set the endpoint and reference an existing credential Secret:
 
-The app still has one local learner. The Service is ClusterIP and the schema only permits local mode; Ingress remains blocked in single-user mode. For a private test deployment:
+```yaml
+storage:
+  provider: s3
+  s3:
+    endpoint: https://objects.internal.example
+    bucket: your-existing-private-bucket
+    prefix: courses/
+    region: us-east-1
+    existingSecret: course-storage
+    accessKeyKey: accessKey
+    secretKeyKey: secretKey
+```
+
+The endpoint must be an HTTP(S) origin without a path or embedded credentials. The app uses path-style S3 requests and conditional writes that prevent overwriting originals. Create the bucket and grant read/write object access before deployment. Existing S3 and GCS buckets are not created by this chart.
+
+To use the MinIO dependency instead:
+
+```yaml
+storage:
+  provider: s3
+  s3:
+    existingSecret: course-minio
+    accessKeyKey: rootUser
+    secretKeyKey: rootPassword
+minio:
+  enabled: true
+  existingSecret: course-minio
+  persistence:
+    storageClass: microk8s-hostpath
+    size: 5Gi
+```
+
+Provision `course-minio` with `rootUser` and `rootPassword` keys in the release namespace. The local test harness generates this Secret automatically using its own test name. With an empty S3 endpoint, the chart selects the bundled service. MinIO runs as a single instance, creates the private `courses` bucket, and stores objects on a PVC. If changing the bucket, update both `storage.s3.bucket` and `minio.buckets`. A bucket prefix does not provide an access boundary.
+
+The standalone MinIO PVC is retained on Helm uninstall by default. Reusing it requires deliberate reattachment through `minio.persistence.existingClaim`; retention does not replace backups. Deleting the namespace or VM can delete storage. Choose an appropriate storage class when running outside MicroK8s.
+
+The official MinIO Helm dependency is pinned to 5.4.0, with explicit server and client image releases in `values.yaml`. [MinIO's community repository](https://github.com/minio/minio) was archived in April 2026; these pins provide reproducible local testing, not ongoing upstream maintenance.
+
+## Test with MicroK8s
+
+See the [local MicroK8s commands](../../README.md#local-microk8s-checks). The harness creates an isolated test namespace, a persistent PostgreSQL fixture outside the app chart, and generated Secret credentials. It imports the local image directly into MicroK8s and deploys this chart with `values-microk8s.yaml`.
+
+`make microk8s-test` checks uploads, exercise generation/publication, answer retries, and file/progress persistence across pod restarts. `make microk8s-forward` exposes the app at http://localhost:8080 and the MinIO console at http://localhost:9001. `make up` uses this MicroK8s setup and stops older Compose services.
+
+## Exercise API credentials
+
+Set `generation.existingSecret` to an existing Secret containing `EXERCISE_API_URL` and optional `EXERCISE_API_KEY`, `EXERCISE_API_MODEL`, `EXERCISE_API_EFFORT`, and `EXERCISE_API_EFFORT_FORMAT` keys. The URL is a complete HTTPS endpoint using the chat-completions format. Effort is optional; an absent or empty value uses the provider default. Effort format defaults to `reasoning_effort`; `reasoning` selects the nested field required by some compatible gateways. These values are injected only into the backend; the chart does not create or embed credentials. Restart the Deployment after rotating the Secret. The local MicroK8s helper synchronizes these variables from `.env` to a Secret and restarts the app when they change.
+
+AI generation performs two sequential provider requests: generation and Romanian language review. Allow at least 130 seconds for request timeouts in any ingress controller or reverse proxy. The application gives the two stages a combined 120-second deadline.
+
+## Access
+
+Database parameters are consumed by the Go server. Storage settings select the course-file location and its credentials, Google identity, or volume mount. Configuring storage does not automatically import documents.
+
+Published questions are public. Uploads, original downloads, generation, and question management require an authenticated owner. Each signed-in user has separate history; anonymous answers are never recorded.
+
+Configure GitHub OAuth through a Secret in the release namespace:
+
+```yaml
+auth:
+  existingSecret: github-auth
+  baseURL: https://learn.example.com
+appMode: public
+```
+
+The Secret contains `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET`. Register `https://learn.example.com/auth/github/callback` as the OAuth callback. An optional `AUTH_LEGACY_GITHUB_ID` key assigns pre-account materials/history only after the specified numeric GitHub identity signs in. The optional `APP_BASE_URL` Secret key overrides the chart origin; keep it consistent with `auth.baseURL` and the registered callback. Credentials are never rendered into a ConfigMap or Helm values.
+
+Public mode requires configured GitHub authentication and HTTPS. Enable Ingress and configure its host/TLS for the same origin when ready. Local mode permits HTTP on localhost and keeps management locked if OAuth credentials are absent. The local helper synchronizes credentials from `.env`; other deployments must restart the app when rotating environment-based Secrets.
+
+The default Service is ClusterIP. For a private test deployment:
 
 ```sh
 kubectl -n romanian port-forward svc/romanian-romanian 8080:8080

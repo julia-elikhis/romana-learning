@@ -6,19 +6,30 @@ Keys: {{ .Values.database.usernameKey }}, {{ .Values.database.passwordKey }}
 {{ else -}}
 Connection URL Secret: {{ .Values.database.existingSecret }} / {{ .Values.database.urlKey }}
 {{ end }}
-Course storage wiring: {{ .Values.storage.provider }}
+Course storage: {{ .Values.storage.provider }}
 {{ if eq .Values.storage.provider "filesystem" -}}
 PVC: {{ include "romanian.claimName" . }} mounted at {{ .Values.storage.filesystem.mountPath }}
 {{ else if eq .Values.storage.provider "gcs" -}}
 Bucket: {{ .Values.storage.gcs.bucket }}; prefix: {{ .Values.storage.gcs.prefix }}
+{{ else if eq .Values.storage.provider "s3" -}}
+Endpoint: {{ include "romanian.s3Endpoint" . }}
+Bucket: {{ .Values.storage.s3.bucket }}; prefix: {{ .Values.storage.s3.prefix }}
 {{ end }}
-Course-library upload APIs and the GCS application adapter are not implemented yet.
+{{ if .Values.minio.enabled -}}
+The MinIO dependency provisions persistent storage and the configured buckets.
+{{ end }}
 
-The current app is a single-user development scaffold, with no public authentication.
+Published questions are public; materials and history belong to signed-in users.
+{{ if .Values.auth.existingSecret -}}
+GitHub OAuth Secret: {{ .Values.auth.existingSecret }}
+Register callback: {{ .Values.auth.baseURL }}/auth/github/callback
+{{ else -}}
+GitHub sign-in is unconfigured. Uploads and question management remain locked.
+{{ end }}
 Access a test-cluster deployment through a local port forward:
 
   kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "romanian.name" . }} 8080:{{ .Values.service.port }}
 
 Then open http://localhost:8080.
-No PostgreSQL instance, logical database, bucket, node, or IAM binding is created.
+No PostgreSQL instance, logical database, node, or IAM binding is created by this chart.
 Create the app's dedicated database and arrange network access before installation.

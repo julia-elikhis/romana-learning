@@ -108,8 +108,8 @@ func TestClaimCreationAndGCSProfiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(out)
 	}
-	if docs["PersistentVolumeClaim"] != nil || pod(docs)["volumes"] != nil {
-		t.Fatal("identity-based GCS must not mount disks/keys")
+	if docs["PersistentVolumeClaim"] != nil || len(pod(docs)["volumes"].([]any)) != 1 {
+		t.Fatal("identity-based GCS should mount only temporary extraction space")
 	}
 	if docs["ConfigMap"]["data"].(map[string]any)["COURSE_STORAGE_BUCKET"] != "YOUR_EXISTING_BUCKET" {
 		t.Fatal("bucket config lost")
@@ -144,11 +144,127 @@ func TestInvalidChartSettingsFail(t *testing.T) {
 		"multiple writers":         "storage.provider=filesystem,storage.filesystem.persistence.create=true,replicaCount=2",
 		"overlapping disk rollout": "storage.provider=filesystem,storage.filesystem.persistence.create=true,strategy.type=RollingUpdate",
 		"unauthenticated ingress":  "ingress.enabled=true",
+		"public without OAuth":     "appMode=public,auth.baseURL=https://learn.example.com",
+		"public over HTTP":         "appMode=public,auth.existingSecret=github-auth",
 	}
 	for name, setting := range tests {
 		t.Run(name, func(t *testing.T) {
 			if _, _, err := render(t, "--set", setting); err == nil {
 				t.Fatal("invalid settings rendered successfully")
+			}
+		})
+	}
+}
+
+func TestGitHubCredentialsAndPublicIngress(t *testing.T) {
+	docs, out, err := render(t, "--set", "appMode=public,auth.existingSecret=github-auth,auth.baseURL=https://learn.example.com,ingress.enabled=true")
+	if err != nil {
+		t.Fatal(out)
+	}
+	data := docs["ConfigMap"]["data"].(map[string]any)
+	if data["APP_BASE_URL"] != "https://learn.example.com" || data["APP_MODE"] != "public" || docs["Ingress"] == nil {
+		t.Fatal("public authentication configuration is missing")
+	}
+	if docs["Secret"] != nil || data["GITHUB_CLIENT_SECRET"] != nil || data["GITHUB_CLIENT_ID"] != nil || data["AUTH_LEGACY_GITHUB_ID"] != nil {
+		t.Fatal("private authentication settings must use an existing Secret")
+	}
+	container := pod(docs)["containers"].([]any)[0].(map[string]any)
+	found := map[string]bool{}
+	for _, value := range container["env"].([]any) {
+		entry := value.(map[string]any)
+		name := entry["name"].(string)
+		if name != "GITHUB_CLIENT_ID" && name != "GITHUB_CLIENT_SECRET" && name != "AUTH_LEGACY_GITHUB_ID" {
+			continue
+		}
+		ref := entry["valueFrom"].(map[string]any)["secretKeyRef"].(map[string]any)
+		if ref["name"] != "github-auth" || ref["key"] != name {
+			t.Fatal("OAuth setting must reference the configured Secret")
+		}
+		if name != "AUTH_LEGACY_GITHUB_ID" && ref["optional"] == true {
+			t.Fatal("OAuth credentials must be required when a Secret is configured")
+		}
+		found[name] = true
+	}
+	if len(found) != 3 {
+		t.Fatal("OAuth Secret references missing")
+	}
+}
+
+func TestGenerationCredentialsOnlyUseExistingSecret(t *testing.T) {
+	docs, out, err := render(t, "--set", "generation.existingSecret=private-generator")
+	if err != nil {
+		t.Fatal(out)
+	}
+	if docs["Secret"] != nil {
+		t.Fatal("chart must not create credentials")
+	}
+	data := docs["ConfigMap"]["data"].(map[string]any)
+	if data["EXERCISE_API_URL"] != nil || data["EXERCISE_API_KEY"] != nil || data["EXERCISE_API_EFFORT"] != nil {
+		t.Fatal("secrets leaked into configmap")
+	}
+	if !strings.Contains(out, "key: EXERCISE_API_URL") || !strings.Contains(out, "name: private-generator") {
+		t.Fatal("generation secret not wired")
+	}
+	container := pod(docs)["containers"].([]any)[0].(map[string]any)
+	foundEffort := false
+	foundFormat := false
+	for _, item := range container["env"].([]any) {
+		entry := item.(map[string]any)
+		if entry["name"] == "EXERCISE_API_EFFORT" {
+			ref := entry["valueFrom"].(map[string]any)["secretKeyRef"].(map[string]any)
+			if ref["name"] != "private-generator" || ref["key"] != "EXERCISE_API_EFFORT" || ref["optional"] != true {
+				t.Fatal("Effort must use an optional key from the configured Secret")
+			}
+			foundEffort = true
+		}
+		if entry["name"] == "EXERCISE_API_EFFORT_FORMAT" {
+			ref := entry["valueFrom"].(map[string]any)["secretKeyRef"].(map[string]any)
+			if ref["name"] != "private-generator" || ref["key"] != "EXERCISE_API_EFFORT_FORMAT" || ref["optional"] != true {
+				t.Fatal("Effort format must use an optional Secret key")
+			}
+			foundFormat = true
+		}
+	}
+	if !foundEffort || !foundFormat {
+		t.Fatal("Effort setting is missing from the backend environment")
+	}
+	if !strings.Contains(out, "mountPath: /tmp") {
+		t.Fatal("PDF extraction needs writable temporary space")
+	}
+}
+
+func TestMicroK8sProfileUsesBundledMinIO(t *testing.T) {
+	docs, out, err := render(t, "-f", "../../charts/romanian/values-microk8s.yaml")
+	if err != nil {
+		t.Fatal(out)
+	}
+	data := docs["ConfigMap"]["data"].(map[string]any)
+	if data["COURSE_STORAGE_PROVIDER"] != "s3" || data["COURSE_S3_ENDPOINT"] != "http://check-minio:9000" || data["PGDATABASE"] != "romanian_test" {
+		t.Fatal("MicroK8s storage/database wiring is incorrect")
+	}
+	if data["COURSE_S3_ACCESS_KEY"] != nil || data["COURSE_S3_SECRET_KEY"] != nil {
+		t.Fatal("S3 credentials leaked into ConfigMap")
+	}
+	for _, expected := range []string{"chart: minio-5.4.0", "name: check-minio", "name: test-minio", "key: rootPassword", "readOnlyRootFilesystem: true"} {
+		if !strings.Contains(out, expected) {
+			t.Fatalf("Missing %s", expected)
+		}
+	}
+	pvc := docs["PersistentVolumeClaim"]
+	if pvc["spec"].(map[string]any)["storageClassName"] != "microk8s-hostpath" ||
+		pvc["metadata"].(map[string]any)["annotations"].(map[string]any)["helm.sh/resource-policy"] != "keep" {
+		t.Fatal("MinIO must use persistent MicroK8s storage retained on Helm uninstall")
+	}
+	if strings.Contains(out, "kind: Secret") || strings.Contains(out, "console123") {
+		t.Fatal("Bundled MinIO must use existing credentials only")
+	}
+	if strings.Contains(out, "name: courses\n              mountPath: /data/courses") {
+		t.Fatal("App must use object storage instead of a course folder")
+	}
+	for name, setting := range map[string]string{"missing credentials": "storage.provider=s3,storage.s3.endpoint=http://storage:9000", "missing endpoint": "storage.provider=s3,storage.s3.existingSecret=s3-credentials", "minio wrong provider": "minio.enabled=true,minio.existingSecret=credentials", "minio ephemeral": "minio.enabled=true,minio.existingSecret=credentials,minio.persistence.enabled=false,storage.provider=s3,storage.s3.existingSecret=credentials"} {
+		t.Run(name, func(t *testing.T) {
+			if _, _, err := render(t, "--set", setting); err == nil {
+				t.Fatal("Invalid object storage configuration rendered")
 			}
 		})
 	}

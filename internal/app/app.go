@@ -4,51 +4,35 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
-	"io"
 	"net/http"
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/julia-elikhis/romana-learning/internal/filestore"
+	"github.com/julia-elikhis/romana-learning/internal/materials"
 )
 
-type Exercise struct {
-	ID          string   `json:"id"`
-	Prompt      string   `json:"prompt"`
-	Options     []string `json:"options"`
-	Answer      string   `json:"-"`
-	Explanation string   `json:"-"`
+type Server struct {
+	DB        *sql.DB
+	Files     filestore.Store
+	Generator *materials.API
+	Auth      *GitHubAuth
 }
-
-var Exercises = []Exercise{
-	{"home-1", "Choose the plural: o casă → două …", []string{"case", "casă", "casi"}, "case", "O casă, două case — a house, two houses."},
-	{"home-2", "Complete: Eu … acasă.", []string{"este", "sunt", "suntem"}, "sunt", "Eu sunt = I am. Eu sunt acasă = I am at home."},
-	{"home-3", "Choose the plural: un apartament → două …", []string{"apartament", "apartamente", "apartamenti"}, "apartamente", "Apartament is neuter: un apartament, două apartamente."},
-	{"home-4", "Complete: Noi … o problemă.", []string{"avem", "am", "are"}, "avem", "Noi avem o problemă = We have a problem."},
-	{"home-5", "Choose: two beautiful houses", []string{"două case frumoase", "două case frumos", "doi case frumoase"}, "două case frumoase", "Case is feminine plural, so use două and frumoase."},
-}
-
-type Server struct{ DB *sql.DB }
 type Attempt struct {
 	ID         string `json:"id"`
 	ExerciseID string `json:"exerciseId"`
 	Answer     string `json:"answer"`
 }
 type Result struct {
+	Saved       bool   `json:"saved"`
 	Correct     bool   `json:"correct"`
 	Answer      string `json:"answer"`
 	Explanation string `json:"explanation"`
+	SourceQuote string `json:"sourceQuote,omitempty"`
 }
 
 var validID = regexp.MustCompile(`^[a-zA-Z0-9-]{16,80}$`)
-
-func Migrate(ctx context.Context, db *sql.DB) error {
-	_, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS attempts (
- id TEXT PRIMARY KEY, exercise_id TEXT NOT NULL, answer TEXT NOT NULL,
- correct BOOLEAN NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
- )`)
-	return err
-}
 
 func (s Server) Routes() http.Handler {
 	mux := http.NewServeMux()
@@ -62,84 +46,194 @@ func (s Server) Routes() http.Handler {
 		}
 		respond(w, 200, map[string]string{"status": "ready"})
 	})
-	mux.HandleFunc("GET /api/exercises", func(w http.ResponseWriter, r *http.Request) { respond(w, 200, Exercises) })
+	mux.HandleFunc("GET /api/exercises", s.exercises)
 	mux.HandleFunc("GET /api/progress", s.progress)
 	mux.HandleFunc("POST /api/attempts", s.attempt)
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { respond(w, 404, map[string]string{"error": "Not found"}) })
-	return mux
+	mux.HandleFunc("GET /api/auth/session", s.authSession)
+	mux.HandleFunc("POST /api/auth/logout", s.logout)
+	mux.HandleFunc("GET /auth/github", s.githubLogin)
+	mux.HandleFunc("GET /auth/github/callback", s.githubCallback)
+	mux.HandleFunc("GET /api/history", requireUser(s.history))
+	mux.HandleFunc("GET /api/library", requireUser(s.library))
+	mux.HandleFunc("POST /api/materials", requireUser(s.upload))
+	mux.HandleFunc("GET /api/materials/{id}", s.owned(s.material, false))
+	mux.HandleFunc("GET /api/materials/{id}/original", s.owned(s.download, false))
+	mux.HandleFunc("PATCH /api/materials/{id}", s.owned(s.reviewSource, false))
+	mux.HandleFunc("POST /api/materials/{id}/generate", s.owned(s.generate, false))
+	mux.HandleFunc("PATCH /api/drafts/{id}", s.owned(s.editExercise, true))
+	mux.HandleFunc("POST /api/drafts/{id}/status", s.owned(s.publishExercise, true))
+	mux.HandleFunc("POST /api/materials/{id}/publish", s.owned(s.bulkPublish, false))
+	mux.HandleFunc("DELETE /api/exercises/{id}", s.owned(s.deleteExercise, true))
+	sessions := s.sessionMiddleware(mux)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "GET" && r.Method != "HEAD" {
+			if origin := r.Header.Get("Origin"); origin != "" && origin != "http://"+r.Host && origin != "https://"+r.Host {
+				fail(w, 403, "Origin not allowed")
+				return
+			}
+			if r.Header.Get("Sec-Fetch-Site") == "cross-site" {
+				fail(w, 403, "Origin not allowed")
+				return
+			}
+		}
+		sessions.ServeHTTP(w, r)
+	})
 }
 
 func (s Server) progress(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 	var attempts, correct, skills int
-	err := s.DB.QueryRowContext(ctx, `SELECT count(*), count(*) FILTER (WHERE correct), count(DISTINCT exercise_id) FILTER (WHERE correct) FROM attempts`).Scan(&attempts, &correct, &skills)
-	if err != nil {
-		respond(w, 503, map[string]string{"error": "Could not load progress"})
+	user := currentUser(r)
+	if user != nil {
+		err := s.DB.QueryRowContext(ctx, `SELECT count(*), count(*) FILTER (WHERE correct), count(DISTINCT exercise_id) FILTER (WHERE correct AND EXISTS(SELECT 1 FROM exercises e WHERE e.id=attempts.exercise_id AND e.status='published')) FROM attempts WHERE user_id=$1`, user.ID).Scan(&attempts, &correct, &skills)
+		if err != nil {
+			fail(w, 503, "Could not load progress")
+			return
+		}
+	}
+	var available int
+	if s.DB.QueryRowContext(ctx, `SELECT count(*) FROM exercises WHERE status='published'`).Scan(&available) != nil {
+		fail(w, 503, "Could not load progress")
 		return
 	}
-	respond(w, 200, map[string]int{"attempts": attempts, "correct": correct, "practiced": skills})
+	respond(w, 200, map[string]any{"attempts": attempts, "correct": correct, "practiced": skills, "available": available, "tracked": user != nil})
 }
 
-func (s Server) attempt(w http.ResponseWriter, r *http.Request) {
-	// This first release is intentionally a single-user, local development mode.
-	// Reject browser cross-origin writes; no public authentication is implemented yet.
-	if origin := r.Header.Get("Origin"); origin != "" && origin != "http://"+r.Host && origin != "https://"+r.Host {
-		respond(w, 403, map[string]string{"error": "Origin not allowed"})
-		return
-	}
-	r.Body = http.MaxBytesReader(w, r.Body, 4096)
-	dec := json.NewDecoder(r.Body)
-	dec.DisallowUnknownFields()
-	var a Attempt
-	if dec.Decode(&a) != nil || !validID.MatchString(a.ID) {
-		respond(w, 400, map[string]string{"error": "Invalid attempt"})
-		return
-	}
-	if err := dec.Decode(&struct{}{}); err != io.EOF {
-		respond(w, 400, map[string]string{"error": "Invalid body"})
-		return
-	}
-	var exercise *Exercise
-	for i := range Exercises {
-		if Exercises[i].ID == a.ExerciseID {
-			exercise = &Exercises[i]
-			break
-		}
-	}
-	if exercise == nil {
-		respond(w, 400, map[string]string{"error": "Unknown exercise"})
-		return
-	}
-	found := false
-	for _, option := range exercise.Options {
-		if a.Answer == option {
-			found = true
-		}
-	}
-	if !found {
-		respond(w, 400, map[string]string{"error": "Choose an available answer"})
-		return
-	}
-	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+type PracticeExercise struct {
+	ID      string   `json:"id"`
+	Kind    string   `json:"kind"`
+	Prompt  string   `json:"prompt"`
+	Options []string `json:"options"`
+}
+
+func (s Server) exercises(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := contextFor(r)
 	defer cancel()
-	correct := strings.TrimSpace(a.Answer) == exercise.Answer
-	_, err := s.DB.ExecContext(ctx, `INSERT INTO attempts(id,exercise_id,answer,correct) VALUES($1,$2,$3,$4) ON CONFLICT(id) DO NOTHING`, a.ID, a.ExerciseID, a.Answer, correct)
+	materialID := r.URL.Query().Get("materialId")
+	query := `SELECT id,kind,prompt,options FROM exercises WHERE status='published'`
+	var args []any
+	if materialID == "" {
+		query += ` ORDER BY random() LIMIT 10`
+	} else {
+		query += ` AND material_id=$1 ORDER BY source_line,id`
+		args = append(args, materialID)
+	}
+	rows, err := s.DB.QueryContext(ctx, query, args...)
 	if err != nil {
-		respond(w, 503, map[string]string{"error": "Answer was not saved. Please retry."})
+		fail(w, 503, "Could not load exercises")
 		return
 	}
+	defer rows.Close()
+	list := []PracticeExercise{}
+	for rows.Next() {
+		var e PracticeExercise
+		var options []byte
+		if err = rows.Scan(&e.ID, &e.Kind, &e.Prompt, &options); err != nil {
+			fail(w, 503, "Could not load exercises")
+			return
+		}
+		if json.Unmarshal(options, &e.Options) != nil {
+			fail(w, 503, "Could not load exercises")
+			return
+		}
+		list = append(list, e)
+	}
+	if rows.Err() != nil {
+		fail(w, 503, "Could not load exercises")
+		return
+	}
+	respond(w, 200, list)
+}
+func (s Server) attempt(w http.ResponseWriter, r *http.Request) {
+	var a Attempt
+	if !decode(w, r, &a, 4096) {
+		return
+	}
+	if !validID.MatchString(a.ID) || a.ExerciseID == "" || len(a.ExerciseID) > 80 || materials.Normalize(a.Answer) == "" || len(a.Answer) > 200 || strings.ContainsRune(a.Answer, 0) {
+		fail(w, 400, "Invalid attempt")
+		return
+	}
+	ctx, cancel := contextFor(r)
+	defer cancel()
 	var storedExercise, storedAnswer string
-	err = s.DB.QueryRowContext(ctx, `SELECT exercise_id,answer,correct FROM attempts WHERE id=$1`, a.ID).Scan(&storedExercise, &storedAnswer, &correct)
-	if errors.Is(err, sql.ErrNoRows) || err != nil {
-		respond(w, 503, map[string]string{"error": "Could not confirm save"})
+	var result Result
+	user := currentUser(r)
+	read := func() error {
+		return s.DB.QueryRowContext(ctx, `SELECT exercise_id,answer,correct,correct_answer,explanation,source_quote FROM attempts WHERE id=$1 AND user_id=$2`, a.ID, user.ID).Scan(&storedExercise, &storedAnswer, &result.Correct, &result.Answer, &result.Explanation, &result.SourceQuote)
+	}
+	reply := func() {
+		if storedExercise != a.ExerciseID || storedAnswer != a.Answer {
+			fail(w, 409, "Attempt identifier already used")
+			return
+		}
+		result.Saved = true
+		respond(w, 200, result)
+	}
+	if user != nil {
+		err := read()
+		if err == nil {
+			reply()
+			return
+		}
+		if err != sql.ErrNoRows {
+			fail(w, 503, "Could not confirm save")
+			return
+		}
+	}
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		fail(w, 503, "Could not save the answer")
 		return
 	}
-	if storedExercise != a.ExerciseID || storedAnswer != a.Answer {
-		respond(w, 409, map[string]string{"error": "Attempt identifier already used"})
+	defer tx.Rollback()
+	// A deletion must wait for an in-flight answer to finish saving its snapshot.
+	d, err := scanDraft(tx.QueryRowContext(ctx, `SELECT `+exerciseFields+` FROM exercises WHERE id=$1 AND status='published' FOR SHARE`, a.ExerciseID))
+	if err == sql.ErrNoRows {
+		fail(w, 400, "Unknown or unpublished exercise")
 		return
 	}
-	respond(w, 200, Result{correct, exercise.Answer, exercise.Explanation})
+	if err != nil {
+		fail(w, 503, "Could not load exercise")
+		return
+	}
+	if d.Kind == "multiple_choice" {
+		found := false
+		for _, o := range d.Options {
+			if o == a.Answer {
+				found = true
+			}
+		}
+		if !found {
+			fail(w, 400, "Choose an available answer")
+			return
+		}
+	}
+	correct := false
+	for _, answer := range d.Answers {
+		if materials.Normalize(a.Answer) == materials.Normalize(answer) {
+			correct = true
+		}
+	}
+	if user == nil {
+		respond(w, 200, Result{Correct: correct, Answer: d.Answers[0], Explanation: d.Explanation, SourceQuote: d.SourceQuote, Saved: false})
+		return
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO attempts(id,exercise_id,answer,correct,correct_answer,explanation,source_quote,user_id,question_prompt) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(user_id,id) DO NOTHING`, a.ID, a.ExerciseID, a.Answer, correct, d.Answers[0], d.Explanation, d.SourceQuote, user.ID, d.Prompt)
+	if err != nil {
+		fail(w, 503, "Answer was not saved. Please retry.")
+		return
+	}
+	if err = tx.Commit(); err != nil {
+		fail(w, 503, "Could not confirm the saved answer. Please retry")
+		return
+	}
+	if read() != nil {
+		fail(w, 503, "Could not confirm save")
+		return
+	}
+	reply()
 }
 
 func respond(w http.ResponseWriter, status int, v any) {

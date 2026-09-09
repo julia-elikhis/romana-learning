@@ -1,6 +1,6 @@
 {{- if .Values.ingress.enabled }}
 {{- if eq .Values.appMode "local" }}
-{{- fail "Ingress is disabled for local mode. Implement authentication before enabling public access." }}
+{{- fail "Set appMode=public and configure GitHub authentication before enabling Ingress" }}
 {{- end }}
 apiVersion: networking.k8s.io/v1
 kind: Ingress

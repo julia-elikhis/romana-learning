@@ -14,7 +14,7 @@ COPY internal/ internal/
 RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /server ./cmd/server
 
 FROM alpine:3.23
-RUN apk add --no-cache ca-certificates && adduser -D -u 10001 app
+RUN apk add --no-cache ca-certificates poppler-utils && adduser -D -u 10001 app && mkdir -p /data/courses && chown app:app /data/courses
 WORKDIR /app
 COPY --from=backend /server /app/server
 COPY --from=frontend /src/web/dist /app/web/dist

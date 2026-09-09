@@ -1,0 +1,8 @@
+.env
+.env.*
+*.private.yaml
+*.private.yml
+secrets/
+credentials*.json
+*.pem
+.DS_Store
