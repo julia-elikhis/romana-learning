@@ -13,3 +13,8 @@ web/playwright-report/
 secrets/
 credentials*.json
 *.pem
+
+data/
+APP_PLAN.md
+EXAM_PLAN.md
+TECH_PLAN.md
