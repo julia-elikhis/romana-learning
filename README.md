@@ -61,6 +61,8 @@ The local generator creates sentence gaps and multiple-choice questions from sou
 
 Practice starts with five built-in questions and draws up to ten random questions from that starter set and published course questions. It shows one question at a time after starting, with no preview of upcoming questions. Publishing makes questions and their feedback available to everyone; original documents and unpublished drafts are accessible only to admins. Practice history remains private to the learner.
 
+The practice page includes a public weekly leaderboard: one point per distinct question answered correctly by a signed-in GitHub user, counted once per UTC week (Monday 00:00 through the following Monday). Repeated answers add no points; mistakes do not subtract points. The top five learners are shown with shared ranks for ties, and signed-in users can also see their own position below the top five. Only GitHub usernames and aggregate scores are public; individual answers and history remain private. Edits or deletion of a question preserve points already earned from saved answers. Anonymous practice does not enter the leaderboard.
+
 Original files use Google Cloud Storage by default, with MinIO available through the explicit local storage mode. The chart also supports an existing S3-compatible service or persistent filesystem. Document metadata, reviewed text, drafts, and progress are stored in PostgreSQL. Back up both the database and original-file storage. The Docker image includes PDF extraction; host development requires `pdftotext` for PDF uploads.
 
 ### Optional API generation

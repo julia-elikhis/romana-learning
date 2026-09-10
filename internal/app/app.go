@@ -48,6 +48,7 @@ func (s Server) Routes() http.Handler {
 	})
 	mux.HandleFunc("GET /api/exercises", s.exercises)
 	mux.HandleFunc("GET /api/progress", s.progress)
+	mux.HandleFunc("GET /api/leaderboard", s.leaderboard)
 	mux.HandleFunc("POST /api/attempts", s.attempt)
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { respond(w, 404, map[string]string{"error": "Not found"}) })
 	mux.HandleFunc("GET /api/auth/session", s.authSession)
