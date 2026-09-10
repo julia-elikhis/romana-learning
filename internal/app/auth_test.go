@@ -28,6 +28,9 @@ func testAccount(t *testing.T, db *sql.DB, id string) *http.Cookie {
 func authenticatedHandler(t *testing.T, db *sql.DB, handler http.Handler) http.Handler {
 	t.Helper()
 	cookie := testAccount(t, db, "test-owner")
+	if _, err := db.Exec(`UPDATE app_users SET is_admin=true WHERE id='test-owner'`); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := db.Exec(`UPDATE attempts SET user_id='test-owner' WHERE user_id='legacy-local-owner'`); err != nil {
 		t.Fatal(err)
 	}
@@ -59,13 +62,13 @@ func TestAccountIsolationAndAnonymousPractice(t *testing.T) {
 	}
 	request(nil, "DELETE", "/api/exercises/"+questions[0].ID, nil, 401)
 	for _, path := range []string{"/api/materials/" + id, "/api/materials/" + id + "/original"} {
-		request(bob, "GET", path, nil, 404)
+		request(bob, "GET", path, nil, 403)
 	}
-	request(bob, "POST", "/api/materials/"+id+"/generate", map[string]any{}, 404)
-	request(bob, "POST", "/api/materials/"+id+"/publish", map[string]any{}, 404)
-	request(bob, "PATCH", "/api/drafts/"+questions[0].ID, map[string]any{}, 404)
-	request(bob, "DELETE", "/api/exercises/"+questions[0].ID, nil, 404)
-	if bytes.Contains(request(bob, "GET", "/api/library", nil, 200), []byte(id)) {
+	request(bob, "POST", "/api/materials/"+id+"/generate", map[string]any{}, 403)
+	request(bob, "POST", "/api/materials/"+id+"/publish", map[string]any{}, 403)
+	request(bob, "PATCH", "/api/drafts/"+questions[0].ID, map[string]any{}, 403)
+	request(bob, "DELETE", "/api/exercises/"+questions[0].ID, nil, 403)
+	if bytes.Contains(request(bob, "GET", "/api/library", nil, 403), []byte(id)) {
 		t.Fatal("Another user's library was exposed")
 	}
 	request(nil, "GET", "/api/exercises?materialId="+id, nil, 200)

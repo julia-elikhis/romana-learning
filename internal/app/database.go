@@ -19,6 +19,9 @@ var githubAccountsMigration string
 //go:embed migrations/005_restore_starters.sql
 var restoreStartersMigration string
 
+//go:embed migrations/006_admin_roles.sql
+var adminRolesMigration string
+
 func Migrate(ctx context.Context, db *sql.DB) error {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
@@ -85,6 +88,17 @@ func Migrate(ctx context.Context, db *sql.DB) error {
 			return err
 		}
 		if _, err = tx.ExecContext(ctx, `INSERT INTO schema_migrations(version) VALUES(5)`); err != nil {
+			return err
+		}
+	}
+	if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version=6)`).Scan(&installed); err != nil {
+		return err
+	}
+	if !installed {
+		if _, err = tx.ExecContext(ctx, adminRolesMigration); err != nil {
+			return err
+		}
+		if _, err = tx.ExecContext(ctx, `INSERT INTO schema_migrations(version) VALUES(6)`); err != nil {
 			return err
 		}
 	}

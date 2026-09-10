@@ -2,7 +2,7 @@
 # The production renderer supplies identifiers from SOPS, plus the ingress overlay.
 image:
   repository: elikhis/romana-learning
-  tag: "20260909-2@sha256:14d018db582cc0078be461a3b4522ce948f342cc8257ae651198e28ce3e3889e"
+  tag: "20260910-1@sha256:d0412b68f51dc19db01cc184919ff8800b2345a450b42de4f9763ceaa49af1d6"
 appMode: public
 auth:
   existingSecret: github-auth

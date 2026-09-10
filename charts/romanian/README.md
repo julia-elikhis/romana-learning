@@ -181,7 +181,7 @@ AI generation performs two sequential provider requests: generation and Romanian
 
 Database parameters are consumed by the Go server. Storage settings select the course-file location and its credentials, Google identity, or volume mount. Helm alone does not copy documents. The local deployment helper copies and verifies database-referenced originals when switching between Google storage and MinIO, retaining the source copies.
 
-Published questions are public. Uploads, original downloads, generation, and question management require an authenticated owner. Each signed-in user has separate history; anonymous answers are never recorded.
+Published questions are public. Uploads, original downloads, generation, and question management require an authenticated admin. Admins share the course library and can manage user roles. Each signed-in user has separate history; anonymous answers are never recorded.
 
 Configure GitHub OAuth through a Secret in the release namespace:
 

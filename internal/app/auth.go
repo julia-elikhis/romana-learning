@@ -21,9 +21,10 @@ import (
 )
 
 type User struct {
-	ID    string `json:"id"`
-	Login string `json:"login"`
-	Name  string `json:"name"`
+	ID      string `json:"id"`
+	Login   string `json:"login"`
+	Name    string `json:"name"`
+	IsAdmin bool   `json:"isAdmin"`
 }
 type userContextKey struct{}
 
@@ -109,7 +110,7 @@ func (s Server) sessionMiddleware(next http.Handler) http.Handler {
 			ctx, cancel := contextFor(r)
 			defer cancel()
 			var user User
-			err = s.DB.QueryRowContext(ctx, `SELECT u.id,u.login,u.name FROM auth_sessions a JOIN app_users u ON u.id=a.user_id WHERE a.token_hash=$1 AND a.expires_at>now()`, tokenHash(cookie.Value)).Scan(&user.ID, &user.Login, &user.Name)
+			err = s.DB.QueryRowContext(ctx, `SELECT u.id,u.login,u.name,u.is_admin FROM auth_sessions a JOIN app_users u ON u.id=a.user_id WHERE a.token_hash=$1 AND a.expires_at>now()`, tokenHash(cookie.Value)).Scan(&user.ID, &user.Login, &user.Name, &user.IsAdmin)
 			if err == nil {
 				r = r.WithContext(context.WithValue(r.Context(), userContextKey{}, &user))
 			} else if err == sql.ErrNoRows {
@@ -130,26 +131,6 @@ func requireUser(next http.HandlerFunc) http.HandlerFunc {
 		}
 		next(w, r)
 	}
-}
-func (s Server) owned(next http.HandlerFunc, exercise bool) http.HandlerFunc {
-	return requireUser(func(w http.ResponseWriter, r *http.Request) {
-		ctx, cancel := contextFor(r)
-		defer cancel()
-		var allowed bool
-		query := `SELECT EXISTS(SELECT 1 FROM materials WHERE id=$1 AND owner_id=$2)`
-		if exercise {
-			query = `SELECT EXISTS(SELECT 1 FROM exercises e JOIN materials m ON m.id=e.material_id WHERE e.id=$1 AND m.owner_id=$2)`
-		}
-		if err := s.DB.QueryRowContext(ctx, query, r.PathValue("id"), currentUser(r).ID).Scan(&allowed); err != nil {
-			fail(w, 503, "Could not verify document access")
-			return
-		}
-		if !allowed {
-			fail(w, 404, "Document or question not found")
-			return
-		}
-		next(w, r)
-	})
 }
 func (s Server) authSession(w http.ResponseWriter, r *http.Request) {
 	respond(w, 200, map[string]any{"user": currentUser(r), "githubEnabled": s.Auth != nil})

@@ -16,7 +16,7 @@ func TestLanguageReviewRejectsBadRomanianEvenWhenCopiedFromDocument(t *testing.T
 	incorrect := Draft{Kind: "cloze", Prompt: "Eu ____ acasă.", Answers: []string{"este"}, Explanation: "An incorrect explanation copied from teaching notes.", SourceQuote: "Eu este acasă."}
 	correct := Draft{Kind: "cloze", Prompt: "Noi ____ acasă.", Answers: []string{"suntem"}, Explanation: "Noi suntem means we are.", SourceQuote: "Noi suntem acasă."}
 	unsupported := correct
-	unsupported.Answers = []string{"invented"}
+	unsupported.Answers = []string{}
 	calls := 0
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++

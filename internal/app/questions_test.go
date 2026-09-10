@@ -67,16 +67,15 @@ func TestBulkPublicationAndDeletionPreserveHistory(t *testing.T) {
 		}
 	}
 	edits[0].Explanation = "A reviewed explanation from the editor."
-	request("POST", path, batch(edits[:2], false), 400)
 	request("POST", path, batch([]questionEdit{}, true), 400)
 	request("POST", path, batch([]questionEdit{edits[0], edits[0]}, true), 400)
 	request("POST", path, batch([]questionEdit{edits[0], foreign[0]}, true), 404)
 	invalid := edits[1]
-	invalid.Answers = []string{"invented"}
+	invalid.Answers = []string{}
 	request("POST", path, batch([]questionEdit{edits[0], invalid}, true), 400)
 	assertUnchanged()
-	request("POST", path, batch(edits[:2], true), 200)
-	request("POST", path, batch(edits[:2], true), 200) // lost-response retry
+	request("POST", path, batch(edits[:2], false), 200)
+	request("POST", path, batch(edits[:2], false), 200) // lost-response retry
 	changedPublished := edits[0]
 	changedPublished.Explanation = "Do not rewrite a published answer."
 	request("POST", path, batch([]questionEdit{changedPublished, edits[2]}, true), 409)

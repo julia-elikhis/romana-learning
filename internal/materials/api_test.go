@@ -94,7 +94,7 @@ func TestAPIProducesTraceableDrafts(t *testing.T) {
 		t.Fatal("Invented source was accepted")
 	}
 	candidate.SourceQuote = source
-	candidate.Answers = []string{"invented"}
+	candidate.Answers = []string{}
 	if _, err = api.Generate(context.Background(), source, "material", 5); err == nil {
 		t.Fatal("Unsupported answer accepted")
 	}
@@ -177,7 +177,7 @@ func TestGeneratedReferencesComeFromSourceAndInvalidCandidatesAreSkipped(t *test
 	first := Draft{Kind: "cloze", Prompt: "Eu ____ acasă în fiecare zi.", Answers: []string{"sunt"}, Explanation: "Eu sunt means I am.", SourceQuote: "Eu sunt acasă în fiecare zi.", SourceLine: 4}
 	second := Draft{Kind: "multiple_choice", Prompt: "Noi ____ o casă frumoasă.", Options: []string{"avem", "aveți", "au"}, Answers: []string{"avem"}, Explanation: "Noi takes avem.", SourceQuote: "Noi avem o casă frumoasă.", SourceLine: 999}
 	unsupported := first
-	unsupported.Answers = []string{"invented"}
+	unsupported.Answers = []string{}
 	badOptions := second
 	badOptions.Options = []string{"avem", " AVEM. "}
 	fakeQuote := first
@@ -200,7 +200,7 @@ func TestGeneratedReferencesComeFromSourceAndInvalidCandidatesAreSkipped(t *test
 	for i, want := range []struct {
 		question int
 		reason   string
-	}{{1, "primary answer"}, {3, "distinct"}, {4, "source quote"}, {6, "duplicates"}} {
+	}{{1, "accepted answers"}, {3, "distinct"}, {4, "source quote"}, {6, "duplicates"}} {
 		if result.Skipped[i].Question != want.question || !strings.Contains(result.Skipped[i].Reason, want.reason) {
 			t.Fatal("Skipped candidates lack the specific safe validation reason")
 		}
@@ -216,9 +216,9 @@ func TestGeneratedReferencesComeFromSourceAndInvalidCandidatesAreSkipped(t *test
 
 func TestAllInvalidGeneratedAnswersReportRuleWithoutLeakingText(t *testing.T) {
 	source := "Eu sunt acasă în fiecare zi."
-	candidate := Draft{Kind: "cloze", Prompt: "Eu ____ acasă în fiecare zi.", Answers: []string{"private-provider-value"}, Explanation: "A model explanation.", SourceQuote: source}
+	candidate := Draft{Kind: "cloze", Prompt: "Eu ____ acasă în fiecare zi.", Answers: []string{strings.Repeat("private-provider-value", 20)}, Explanation: "A model explanation.", SourceQuote: source}
 	result, err := validateGenerated([]Draft{candidate}, source, "lesson")
-	if err == nil || len(result.Exercises) != 0 || !strings.Contains(err.Error(), "Question 1") || !strings.Contains(err.Error(), "primary answer must appear") || strings.Contains(err.Error(), "private-provider-value") {
+	if err == nil || len(result.Exercises) != 0 || !strings.Contains(err.Error(), "Question 1") || !strings.Contains(err.Error(), "Invalid accepted answer") || strings.Contains(err.Error(), "private-provider-value") {
 		t.Fatal("Invalid answer must be rejected with a specific rule and no model content")
 	}
 	candidate.Answers = []string{"sunt"}

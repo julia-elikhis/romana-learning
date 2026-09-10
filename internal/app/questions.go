@@ -6,9 +6,82 @@ import (
 	"net/http"
 	"slices"
 	"sort"
+	"strconv"
+	"strings"
 
 	"github.com/julia-elikhis/romana-learning/internal/materials"
 )
+
+type ManagedQuestion struct {
+	materials.Draft
+	MaterialID    string `json:"materialId"`
+	MaterialTitle string `json:"materialTitle"`
+}
+
+func (s Server) adminQuestions(w http.ResponseWriter, r *http.Request) {
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	status := r.URL.Query().Get("status")
+	page := 1
+	if value := r.URL.Query().Get("page"); value != "" {
+		var err error
+		page, err = strconv.Atoi(value)
+		if err != nil || page < 1 || page > 100000 {
+			fail(w, 400, "Invalid page")
+			return
+		}
+	}
+	if len(q) > 300 || strings.ContainsRune(q, 0) {
+		fail(w, 400, "Search must be under 300 characters")
+		return
+	}
+	if status != "" && status != "draft" && status != "published" && status != "rejected" {
+		fail(w, 400, "Invalid question status")
+		return
+	}
+	// Literal, case-insensitive search also accepts Romanian without diacritics.
+	q = strings.NewReplacer("ă", "a", "â", "a", "î", "i", "ș", "s", "ț", "t", "ş", "s", "ţ", "t").Replace(strings.ToLower(q))
+	ctx, cancel := contextFor(r)
+	defer cancel()
+	tx, err := s.DB.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
+	if err != nil {
+		fail(w, 503, "Could not load questions")
+		return
+	}
+	defer tx.Rollback()
+	const from = ` FROM exercises e LEFT JOIN materials m ON m.id=e.material_id WHERE e.status<>'deleted' AND ($1='' OR e.status=$1) AND strpos(translate(lower(concat_ws(' ',e.prompt,e.answers::text,e.options::text,e.explanation,e.source_quote,coalesce(m.title,'Starter questions'))),'ăâîșțşţ','aaistst'),$2)>0`
+	var total int
+	if tx.QueryRowContext(ctx, `SELECT count(*)`+from, status, q).Scan(&total) != nil {
+		fail(w, 503, "Could not count questions")
+		return
+	}
+	const pageSize = 30
+	rows, err := tx.QueryContext(ctx, `SELECT e.id,e.kind,e.prompt,e.options,e.answers,e.explanation,e.source_quote,e.source_line,e.status,coalesce(e.material_id,''),coalesce(m.title,'Starter questions')`+from+` ORDER BY e.created_at DESC,e.id LIMIT $3 OFFSET $4`, status, q, pageSize, (page-1)*pageSize)
+	if err != nil {
+		fail(w, 503, "Could not load questions")
+		return
+	}
+	defer rows.Close()
+	questions := []ManagedQuestion{}
+	for rows.Next() {
+		var item ManagedQuestion
+		var options, answers []byte
+		if rows.Scan(&item.ID, &item.Kind, &item.Prompt, &options, &answers, &item.Explanation, &item.SourceQuote, &item.SourceLine, &item.Status, &item.MaterialID, &item.MaterialTitle) != nil || json.Unmarshal(options, &item.Options) != nil || json.Unmarshal(answers, &item.Answers) != nil {
+			fail(w, 503, "Could not read questions")
+			return
+		}
+		questions = append(questions, item)
+	}
+	if rows.Err() != nil {
+		fail(w, 503, "Could not read questions")
+		return
+	}
+	rows.Close()
+	if tx.Commit() != nil {
+		fail(w, 503, "Could not load questions")
+		return
+	}
+	respond(w, 200, map[string]any{"questions": questions, "total": total, "page": page, "pageSize": pageSize})
+}
 
 // Each selected question carries the edits being reviewed in the browser.
 type questionEdit struct {
@@ -28,8 +101,8 @@ func (s Server) bulkPublish(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &body, 1<<20) {
 		return
 	}
-	if !body.Reviewed || len(body.Exercises) == 0 || len(body.Exercises) > 100 {
-		fail(w, 400, "Select 1–100 draft questions and confirm that you reviewed their answers")
+	if len(body.Exercises) == 0 || len(body.Exercises) > 100 {
+		fail(w, 400, "Select 1–100 draft questions")
 		return
 	}
 	seen := map[string]bool{}

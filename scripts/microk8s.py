@@ -436,7 +436,7 @@ def test_session():
     user_id = 'browser-test-' + uuid.uuid4().hex
     token = secrets.token_urlsafe(32)
     hashed = hashlib.sha256(token.encode()).hexdigest()
-    sql("BEGIN; INSERT INTO app_users(id,login) VALUES('" + user_id + "','Test learner');"
+    sql("BEGIN; INSERT INTO app_users(id,login,is_admin) VALUES('" + user_id + "','" + user_id + "',true);"
         "INSERT INTO auth_sessions(token_hash,user_id,expires_at) VALUES('" + hashed + "','" + user_id + "',now()+interval '1 hour'); COMMIT;")
     return {'userID': user_id, 'cookie': 'romana_session=' + token}
 

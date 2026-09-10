@@ -19,7 +19,8 @@ Bucket: {{ .Values.storage.s3.bucket }}; prefix: {{ .Values.storage.s3.prefix }}
 The MinIO dependency provisions persistent storage and the configured buckets.
 {{ end }}
 
-Published questions are public; materials and history belong to signed-in users.
+Published questions are public; course materials and question management require admin access.
+Each signed-in learner has private practice history.
 {{ if .Values.auth.existingSecret -}}
 GitHub OAuth Secret: {{ .Values.auth.existingSecret }}
 Register callback: {{ .Values.auth.baseURL }}/auth/github/callback

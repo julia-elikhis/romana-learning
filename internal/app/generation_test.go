@@ -54,7 +54,10 @@ func TestAIGenerationSavesOnlyAfterLanguageApproval(t *testing.T) {
 	}
 	handler := authenticatedHandler(t, db, Server{DB: db, Generator: api}.Routes())
 	id, _ := questionFixtures(t, db, 0, "draft")
-	payload := map[string]any{"count": 5, "mode": "api", "sendToApi": true}
+	if _, err := db.Exec(`UPDATE materials SET reviewed=false WHERE id=$1`, id); err != nil {
+		t.Fatal(err)
+	}
+	payload := map[string]any{"count": 5, "mode": "api"}
 	questionRequest(t, handler, "POST", "/api/materials/"+id+"/generate", payload, 422)
 	var count int
 	if err := db.QueryRow(`SELECT count(*) FROM exercises WHERE material_id=$1`, id).Scan(&count); err != nil || count != 0 || calls != 2 {

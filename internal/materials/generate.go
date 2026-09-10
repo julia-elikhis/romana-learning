@@ -154,8 +154,8 @@ func Validate(d Draft) error {
 	if d.Kind != "cloze" && d.Kind != "multiple_choice" {
 		return errors.New("Choose cloze or multiple_choice")
 	}
-	if len(strings.TrimSpace(d.Prompt)) < 5 || len(d.Prompt) > 1000 || strings.Count(d.Prompt, "____") != 1 {
-		return errors.New("The prompt needs a ____ gap and must be under 1,000 characters")
+	if len(strings.TrimSpace(d.Prompt)) < 5 || len(d.Prompt) > 1000 {
+		return errors.New("Provide a question under 1,000 characters")
 	}
 	if len(d.Answers) < 1 || len(d.Answers) > 5 {
 		return errors.New("Provide 1–5 accepted answers")
@@ -165,11 +165,11 @@ func Validate(d Draft) error {
 			return errors.New("Invalid accepted answer")
 		}
 	}
-	if !strings.Contains(Normalize(d.SourceQuote), Normalize(d.Answers[0])) {
-		return errors.New("The primary answer must appear in the cited source")
-	}
 	if len(d.Explanation) > 1500 || strings.TrimSpace(d.Explanation) == "" {
 		return errors.New("Provide a short explanation")
+	}
+	if d.Kind == "cloze" && strings.Count(d.Prompt, "____") != 1 {
+		return errors.New("A cloze question needs exactly one ____ gap")
 	}
 	if d.Kind == "cloze" && len(d.Options) != 0 {
 		return errors.New("Cloze exercises do not have answer options")

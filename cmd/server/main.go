@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/julia-elikhis/romana-learning/internal/app"
 	"github.com/julia-elikhis/romana-learning/internal/config"
@@ -16,6 +17,8 @@ import (
 )
 
 func main() {
+	grantAdminID := flag.Int64("grant-admin-github-id", 0, "Grant admin access to an existing GitHub account, then exit")
+	flag.Parse()
 	mode := os.Getenv("APP_MODE")
 	if mode != "local" && mode != "public" {
 		log.Fatal("APP_MODE must be local or public")
@@ -46,6 +49,14 @@ func main() {
 	if err = app.Migrate(ctx, db); err != nil {
 		cancel()
 		log.Fatal("Database migration failed")
+	}
+	if *grantAdminID != 0 {
+		if err = app.GrantAdmin(ctx, db, *grantAdminID); err != nil {
+			log.Fatal(err)
+		}
+		cancel()
+		log.Print("Administrator role granted")
+		return
 	}
 	cancel()
 	addr := os.Getenv("HTTP_ADDR")

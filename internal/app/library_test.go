@@ -110,8 +110,7 @@ func TestLibraryLifecycle(t *testing.T) {
 	if string(request("GET", "/api/materials/"+id+"/original", nil, 200)) != source {
 		t.Fatal("Original did not round trip")
 	}
-	request("POST", "/api/materials/"+id+"/generate", map[string]any{"count": 5}, 409)
-	request("PATCH", "/api/materials/"+id, map[string]any{"text": source, "reviewed": false}, 400)
+	request("PATCH", "/api/materials/"+id, map[string]any{"text": source}, 200)
 	request("PATCH", "/api/materials/"+id, map[string]any{"text": source, "reviewed": true}, 200)
 	request("POST", "/api/materials/"+id+"/generate", map[string]any{"count": 5, "mode": "api"}, 400)
 	request("POST", "/api/materials/"+id+"/generate", map[string]any{"count": 5}, 201)
@@ -132,13 +131,12 @@ func TestLibraryLifecycle(t *testing.T) {
 	first := detail.Exercises[0]
 	attempt := map[string]any{"id": "test-attempt-0001", "exerciseId": first.ID, "answer": first.Answers[0]}
 	request("POST", "/api/attempts", attempt, 400)
-	request("POST", "/api/drafts/"+first.ID+"/status", map[string]any{"status": "published", "reviewed": false}, 400)
 	edit := map[string]any{"kind": first.Kind, "prompt": first.Prompt, "options": first.Options, "answers": []string{"invented"}, "explanation": "Edited explanation"}
 	request("PATCH", "/api/drafts/"+first.ID, edit, 400)
 	edit["answers"] = first.Answers
 	request("PATCH", "/api/drafts/"+first.ID, edit, 200)
-	request("POST", "/api/drafts/"+first.ID+"/status", map[string]any{"status": "published", "reviewed": true}, 200)
-	request("PATCH", "/api/drafts/"+first.ID, edit, 409)
+	request("POST", "/api/drafts/"+first.ID+"/status", map[string]any{"status": "published"}, 200)
+	request("PATCH", "/api/drafts/"+first.ID, edit, 200)
 	request("PATCH", "/api/materials/"+id, map[string]any{"text": "Changed source", "reviewed": true}, 409)
 	raw := request("GET", "/api/exercises?materialId="+id, nil, 200)
 	json.Unmarshal(raw, &deck)
@@ -164,7 +162,7 @@ func TestLibraryLifecycle(t *testing.T) {
 	}
 	// Typed responses preserve Romanian diacritics while accepting case and spacing.
 	typed := detail.Exercises[1]
-	request("POST", "/api/drafts/"+typed.ID+"/status", map[string]any{"status": "published", "reviewed": true}, 200)
+	request("POST", "/api/drafts/"+typed.ID+"/status", map[string]any{"status": "published"}, 200)
 	request("POST", "/api/attempts", map[string]any{"id": "test-attempt-0002", "exerciseId": typed.ID, "answer": " " + strings.ToUpper(typed.Answers[0]) + " "}, 200)
 	request("POST", "/api/drafts/"+detail.Exercises[2].ID+"/status", map[string]any{"status": "rejected"}, 200)
 	revision := upload(source+"\nEi lucrează în fiecare dimineață.", "notes", id)

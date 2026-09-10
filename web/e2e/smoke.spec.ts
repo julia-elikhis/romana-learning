@@ -11,8 +11,8 @@ test('public practice works without saving history or allowing uploads',async({p
  expect((await request.post('/api/drafts/'+exercises[0].id+'/status',{data:{status:'published',reviewed:true}})).ok()).toBe(true);
  await page.goto('/');await page.getByRole('button',{name:'Sign out',exact:true}).click();
  await expect(page.getByText('Practice freely. Anonymous answers are not saved.',{exact:true})).toBeVisible();
- await page.getByRole('button',{name:'Course library',exact:true}).click();
- await expect(page.getByRole('heading',{name:'Make room for your lessons.'})).toBeVisible();
+ await expect(page.getByRole('button',{name:'Course library',exact:true})).toHaveCount(0);
+ await expect(page.getByRole('button',{name:'Questions',exact:true})).toHaveCount(0);
  await expect(page.getByLabel('Document',{exact:true})).toHaveCount(0);
  expect((await request.post('/api/materials',{data:{}})).status()).toBe(401);
  expect((await request.post('/api/materials/'+id+'/generate',{data:{count:5,mode:'local'}})).status()).toBe(401);

@@ -74,7 +74,7 @@ func decode(w http.ResponseWriter, r *http.Request, v any, limit int64) bool {
 func (s Server) library(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := contextFor(r)
 	defer cancel()
-	rows, err := s.DB.QueryContext(ctx, `SELECT `+materialFields+` FROM materials m WHERE m.owner_id=$1 ORDER BY m.created_at DESC,m.id`, currentUser(r).ID)
+	rows, err := s.DB.QueryContext(ctx, `SELECT `+materialFields+` FROM materials m ORDER BY m.created_at DESC,m.id`)
 	if err != nil {
 		fail(w, 503, "Could not load course materials")
 		return
@@ -160,7 +160,7 @@ func (s Server) upload(w http.ResponseWriter, r *http.Request) {
 	revision := 1
 	if replaces != "" {
 		var previousKind string
-		err = tx.QueryRowContext(ctx, `SELECT root_id,kind FROM materials WHERE id=$1 AND owner_id=$2`, replaces, currentUser(r).ID).Scan(&root, &previousKind)
+		err = tx.QueryRowContext(ctx, `SELECT root_id,kind FROM materials WHERE id=$1`, replaces).Scan(&root, &previousKind)
 		if err != nil {
 			fail(w, 404, "The previous document was not found")
 			return
@@ -176,7 +176,7 @@ func (s Server) upload(w http.ResponseWriter, r *http.Request) {
 	}
 	var duplicate string
 	if replaces == "" {
-		err = tx.QueryRowContext(ctx, `SELECT id FROM materials WHERE content_hash=$1 AND kind=$2 AND title=$3 AND owner_id=$4 ORDER BY created_at LIMIT 1`, hash, kind, title, currentUser(r).ID).Scan(&duplicate)
+		err = tx.QueryRowContext(ctx, `SELECT id FROM materials WHERE content_hash=$1 AND kind=$2 AND title=$3 ORDER BY created_at LIMIT 1`, hash, kind, title).Scan(&duplicate)
 	} else {
 		err = tx.QueryRowContext(ctx, `SELECT id FROM materials WHERE root_id=$1 AND content_hash=$2`, root, hash).Scan(&duplicate)
 	}
@@ -265,15 +265,11 @@ func (s Server) reviewSource(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "Provide nonempty text under 200 KB")
 		return
 	}
-	if !body.Reviewed {
-		fail(w, 400, "Confirm that you reviewed this teaching text before approving it")
-		return
-	}
 	ctx, cancel := contextFor(r)
 	defer cancel()
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
-		fail(w, 503, "Could not save source review")
+		fail(w, 503, "Could not save teaching text")
 		return
 	}
 	defer tx.Rollback()
@@ -288,12 +284,12 @@ func (s Server) reviewSource(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if kind == "homework" || kind == "student_submission" {
-		fail(w, 400, "Homework and learner submissions are reference material. Upload reviewed teaching notes or teacher corrections to generate exercises")
+		fail(w, 400, "Homework and learner submissions are reference material. Upload teaching notes or teacher corrections to generate exercises")
 		return
 	}
 	var locked bool
 	if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM exercises WHERE material_id=$1)`, r.PathValue("id")).Scan(&locked); err != nil {
-		fail(w, 503, "Could not save source review")
+		fail(w, 503, "Could not save teaching text")
 		return
 	}
 	if locked {
@@ -301,11 +297,11 @@ func (s Server) reviewSource(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, err = tx.ExecContext(ctx, `UPDATE materials SET extracted_text=$2,reviewed=true WHERE id=$1`, r.PathValue("id"), body.Text); err != nil {
-		fail(w, 503, "Could not save source review")
+		fail(w, 503, "Could not save teaching text")
 		return
 	}
 	if err = tx.Commit(); err != nil {
-		fail(w, 503, "Could not confirm source review")
+		fail(w, 503, "Could not confirm teaching text")
 		return
 	}
 	respond(w, 200, map[string]bool{"reviewed": true})
@@ -327,8 +323,8 @@ func (s Server) generate(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "Choose local or api generation")
 		return
 	}
-	if body.Mode == "api" && (s.Generator == nil || !body.SendToAPI) {
-		fail(w, 400, "Configure the API and confirm sending the reviewed text before using API generation")
+	if body.Mode == "api" && !s.Generator.Ready() {
+		fail(w, 400, "Configure the generation API before generating with AI")
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), materials.GenerationTimeout)
@@ -341,8 +337,7 @@ func (s Server) generate(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback()
 	id := r.PathValue("id")
 	var source, kind string
-	var reviewed bool
-	err = tx.QueryRowContext(ctx, `SELECT extracted_text,kind,reviewed FROM materials WHERE id=$1 FOR UPDATE`, id).Scan(&source, &kind, &reviewed)
+	err = tx.QueryRowContext(ctx, `SELECT extracted_text,kind FROM materials WHERE id=$1 FOR UPDATE`, id).Scan(&source, &kind)
 	if err != nil {
 		if err != sql.ErrNoRows {
 			fail(w, 503, "Could not load the document")
@@ -351,8 +346,8 @@ func (s Server) generate(w http.ResponseWriter, r *http.Request) {
 		fail(w, 404, "Material not found")
 		return
 	}
-	if !reviewed || (kind != "notes" && kind != "teacher_corrections") {
-		fail(w, 409, "Review and approve the teaching text first")
+	if kind != "notes" && kind != "teacher_corrections" {
+		fail(w, 409, "Generate from teaching notes or teacher corrections")
 		return
 	}
 	var existing int
@@ -413,21 +408,17 @@ func (s Server) editExercise(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
-		fail(w, 503, "Could not save draft")
+		fail(w, 503, "Could not save question")
 		return
 	}
 	defer tx.Rollback()
-	d, err := scanDraft(tx.QueryRowContext(ctx, `SELECT `+exerciseFields+` FROM exercises WHERE id=$1 FOR UPDATE`, r.PathValue("id")))
+	d, err := scanDraft(tx.QueryRowContext(ctx, `SELECT `+exerciseFields+` FROM exercises WHERE id=$1 AND status<>'deleted' FOR UPDATE`, r.PathValue("id")))
 	if err != nil {
 		if err != sql.ErrNoRows {
 			fail(w, 503, "Could not load the exercise")
 			return
 		}
 		fail(w, 404, "Exercise not found")
-		return
-	}
-	if d.Status != "draft" {
-		fail(w, 409, "Only drafts can be edited. Published exercises preserve their grading history")
 		return
 	}
 	d.Kind = body.Kind
@@ -446,7 +437,7 @@ func (s Server) editExercise(w http.ResponseWriter, r *http.Request) {
 	answers, _ := json.Marshal(d.Answers)
 	_, err = tx.ExecContext(ctx, `UPDATE exercises SET kind=$2,prompt=$3,options=$4,answers=$5,explanation=$6 WHERE id=$1`, d.ID, d.Kind, d.Prompt, string(options), string(answers), d.Explanation)
 	if err != nil {
-		fail(w, 503, "Could not save draft")
+		fail(w, 503, "Could not save question")
 		return
 	}
 	if err = tx.Commit(); err != nil {
@@ -465,10 +456,6 @@ func (s Server) publishExercise(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.Status != "published" && body.Status != "rejected" {
 		fail(w, 400, "Choose published or rejected")
-		return
-	}
-	if body.Status == "published" && !body.Reviewed {
-		fail(w, 400, "Confirm that you reviewed the exercise and answer")
 		return
 	}
 	ctx, cancel := contextFor(r)

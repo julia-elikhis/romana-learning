@@ -39,13 +39,27 @@ The app requests only the public GitHub profile. It uses a seven-day, HttpOnly s
 
 When upgrading an older single-user database, `AUTH_LEGACY_GITHUB_ID` can identify the numeric GitHub account ID that owns its existing materials and answers. Those records are assigned after that exact account signs in. Leaving it blank keeps the older records unassigned; a new user cannot claim them automatically. Back up the database before upgrading.
 
+## Admin access
+
+New accounts are learners. Only admins can access course documents, upload files, generate, publish, edit, or delete questions, and manage roles. Admins share the course library. Permissions are checked against PostgreSQL on each request, so a role change applies to existing sessions immediately. GitHub login names can change; roles stay attached to the verified account ID.
+
+To appoint the first admin, sign in once, obtain that account's numeric GitHub ID, and run the server's operator command with the same database configuration as the app:
+
+```sh
+kubectl exec -n <namespace> deployment/<deployment> -- /app/server -grant-admin-github-id <numeric-id>
+```
+
+The command grants the role to an existing account and exits. It does not create a session. Afterward, use **Users** to search registered users and choose **Make admin** or **Remove admin**. Another admin must remove your own role, preventing accidental loss of all admin access.
+
+**Questions** shows the full question collection, including starters, with live text search across prompts, answers, explanations, source evidence, and lesson titles. Search accepts Romanian with or without diacritics. Filter by status, preview answers, and choose **Edit question** to save corrections, including on published questions. Future practice uses the correction; previous answers and grading snapshots stay unchanged.
+
 ## Course materials
 
-Sign in and open **Course library** to upload DOCX, text-based PDF, or UTF-8 TXT files, up to 20 MB. Review the extracted teaching text, generate draft questions, check their answers, and publish them into lesson practice. Homework and learner submissions are stored as reference material. Scanned PDFs require OCR before import.
+Admins can open **Course library** to upload DOCX, text-based PDF, or UTF-8 TXT files, up to 20 MB, generate questions, and publish them into practice. Extracted text can be edited if needed; there is no manual correctness confirmation before generation or publication. Homework and learner submissions are stored as reference material. Scanned PDFs require OCR before import.
 
-The local generator creates sentence gaps and multiple-choice questions from source examples. Each draft retains a source quote. Select draft questions, review their answers, and use **Publish selected** to publish them together, including current edits. **Delete question** removes a draft or published question from the library and practice while preserving previously saved answers. Changed course documents can be uploaded as new revisions.
+The local generator creates sentence gaps and multiple-choice questions from source examples. Each draft retains a source quote. Select draft questions and use **Publish selected** to publish them together, including current edits. **Delete question** removes a draft or published question from the library and practice while preserving previously saved answers. Changed course documents can be uploaded as new revisions.
 
-Practice starts with five built-in questions and draws up to ten random questions from that starter set and published course questions. It shows one question at a time after starting, with no preview of upcoming questions. Publishing makes questions and their feedback available to everyone; original documents, unpublished drafts, and personal history remain private to their owner.
+Practice starts with five built-in questions and draws up to ten random questions from that starter set and published course questions. It shows one question at a time after starting, with no preview of upcoming questions. Publishing makes questions and their feedback available to everyone; original documents and unpublished drafts are accessible only to admins. Practice history remains private to the learner.
 
 Original files use Google Cloud Storage by default, with MinIO available through the explicit local storage mode. The chart also supports an existing S3-compatible service or persistent filesystem. Document metadata, reviewed text, drafts, and progress are stored in PostgreSQL. Back up both the database and original-file storage. The Docker image includes PDF extraction; host development requires `pdftotext` for PDF uploads.
 
@@ -61,7 +75,9 @@ The adapter uses the [OpenAI-compatible chat-completions format](https://develop
 
 `make up` and `make microk8s-deploy` decrypt these settings with SOPS in memory and synchronize the API variables to a dedicated Kubernetes Secret. Values are passed through stdin and are not printed or stored in Helm values. The app restarts when settings change. Stop forwarding before redeploying, then run `make microk8s-forward` again. Without a configured URL, AI generation is disabled. For other clusters, set `generation.existingSecret` to an existing Secret with these variable names as keys.
 
-Choose **AI API** in the generation controls to send the reviewed teaching text to the configured provider. Uploading documents does not trigger API calls. The adapter locates exact source quotes in the teaching text and computes their line references. It then makes a separate LLM request to check Romanian grammar, spelling, diacritics, answer correctness, ambiguity, and explanations against the lesson context. Only candidates approved by that review are saved as drafts; skipped candidates are reported. If the review fails or returns incomplete decisions, nothing is saved. The loader stays visible during both steps, which use the configured provider, model, and effort and can take up to two minutes. AI generation is selected by default when configured. The explicitly labeled local method remains offline and does not receive this AI review. If every candidate fails, nothing is saved and the error identifies a failed rule. Provider errors remain redacted. Review remains necessary for language accuracy. API generation accepts up to 30 KB of reviewed text per request; split larger documents into lessons.
+Choose **AI · generate + Romanian review** in the generation controls to send the teaching text to the configured provider. Uploading documents does not trigger API calls. The adapter locates exact source quotes in the teaching text and computes their line references. It then makes a separate LLM request to check Romanian grammar, spelling, diacritics, answer correctness, ambiguity, and explanations against the lesson context. Only candidates approved by that review are saved as drafts; skipped candidates are reported. If the review fails or returns incomplete decisions, nothing is saved. The loader stays visible during both steps, which use the configured provider, model, and effort and can take up to two minutes. AI generation is selected by default when configured. The explicitly labeled local method remains offline and does not receive this AI review. If every candidate fails, nothing is saved and the error identifies a failed rule. Provider errors remain redacted. Admins can correct any question later. API generation accepts up to 30 KB of usable text per request; split larger documents into lessons.
+
+Generation uses Romanian examples and English notes. Non-Latin annotations, including Hebrew, are removed before both model requests; the prompts also exclude other languages written in Latin script. The model translates to English independently and may correct a source mistake without copying it into the answer. Source quotes remain verbatim evidence from the original document. Tune the instructions in `internal/materials/prompts/generate.txt` and `internal/materials/prompts/review.txt`, then rebuild the app. Changes affect future generation.
 
 ## Development
 

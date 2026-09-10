@@ -11,9 +11,7 @@ test('bulk publishing includes edits; deleting questions preserves personal hist
  await page.getByLabel('Document',{exact:true}).setInputFiles({name:'lesson.txt',mimeType:'text/plain',buffer:Buffer.from('Eu sunt acasă în fiecare zi.\nNoi avem o casă foarte frumoasă.\nTu mergi la școală dimineața.')});
  const uploaded=page.waitForResponse(r=>r.url().endsWith('/api/materials')&&r.request().method()==='POST');
  await page.getByRole('button',{name:'Upload document'}).click();const materialID=(await(await uploaded).json()).id;
- await expect(page.getByRole('textbox',{name:'Teaching text',exact:true})).toHaveValue(/Eu sunt acasă/);
- await expect(page.getByRole('button',{name:'Generate drafts',exact:true})).toBeDisabled();
- await page.getByLabel('I checked this text').check();await page.getByRole('button',{name:'Save and approve text'}).click();
+ await expect(page.getByLabel('I checked this text')).toHaveCount(0);
  await expect(page.getByRole('button',{name:'Generate drafts',exact:true})).toBeEnabled();
  await page.getByRole('combobox',{name:'Generation method',exact:true}).selectOption('local');
  let releaseGeneration!:()=>void;
@@ -38,11 +36,12 @@ test('bulk publishing includes edits; deleting questions preserves personal hist
  await third.getByRole('button',{name:'Confirm deletion',exact:true}).click();
  await expect(page.locator('article.draft')).toHaveCount(2);
  const explanation='Recall sunt: Eu sunt acasă în fiecare zi.';
+ await page.locator('article.draft').first().getByRole('button',{name:'Edit question',exact:true}).click();
  await page.locator('article.draft').first().getByRole('combobox',{name:'Exercise type',exact:true}).selectOption('cloze');
  await page.locator('article.draft').first().getByRole('textbox',{name:'Explanation',exact:true}).fill(explanation);
  await page.getByLabel('Select all draft questions',{exact:true}).check();
- await expect(page.getByRole('button',{name:'Publish selected (2)',exact:true})).toBeDisabled();
- await page.getByLabel('I reviewed the selected questions and their answers.',{exact:true}).check();
+ await expect(page.getByRole('button',{name:'Publish selected (2)',exact:true})).toBeEnabled();
+ await expect(page.getByLabel('I reviewed the selected questions')).toHaveCount(0);
  await page.getByRole('button',{name:'Publish selected (2)',exact:true}).click();
  await expect(page.locator('article.published')).toHaveCount(2);
  const detail=await(await request.get('/api/materials/'+materialID)).json();
