@@ -1,5 +1,6 @@
 import {useEffect,useState} from 'react';
 import {api,type LeaderboardData,type LeaderboardEntry,type User} from './api';
+import {Avatar} from './Avatar';
 
 export function Leaderboard({user,githubEnabled,refreshKey}:{user:User|null|undefined;githubEnabled:boolean;refreshKey:number}) {
  const [board,setBoard]=useState<LeaderboardData>(),[loading,setLoading]=useState(true),[error,setError]=useState(false),[retry,setRetry]=useState(0);
@@ -26,6 +27,7 @@ export function Leaderboard({user,githubEnabled,refreshKey}:{user:User|null|unde
 function LeaderRow({entry}:{entry:LeaderboardEntry}) {
  return <li className={entry.isYou?'leaderboard-row is-you':'leaderboard-row'}>
   <span className={'leaderboard-rank '+(entry.rank<=3?'top-rank':'')} aria-label={'Rank '+entry.rank}>{entry.rank}</span>
+  <Avatar login={entry.login}/>
   <span className="leaderboard-login" title={entry.login}>{entry.login}</span>
   {entry.isYou&&<span className="leaderboard-you">You</span>}
   <span className="leaderboard-score" aria-label={`${entry.score} ${entry.score===1?'point':'points'}`}><strong>{entry.score}</strong><span>pts</span></span>

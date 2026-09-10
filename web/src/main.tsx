@@ -1,41 +1,110 @@
-import { useEffect, useRef, useState } from 'react';
-import { createRoot } from 'react-dom/client';
+import {useEffect,useRef,useState} from 'react';
+import {createRoot} from 'react-dom/client';
 import './style.css';
-
-import {api,json,type Exercise,type Progress,type Result,type Material,type AuthSession} from './api';
+import {api,json,type Exercise,type Result,type Material,type AuthSession} from './api';
 import {Library} from './Library';
 import {History} from './History';
 import {Questions} from './Questions';
 import {Users} from './Users';
 import {Leaderboard} from './Leaderboard';
+import {Avatar,SignOutIcon} from './Avatar';
+import {ReportQuestion} from './ReportQuestion';
+import {Reports} from './Reports';
+
 function App(){
- const [page,setPage]=useState<'practice'|'library'|'history'|'questions'|'users'>('practice'),[lesson,setLesson]=useState<Material>();
- const [session,setSession]=useState<AuthSession>();
- const [exercises,setExercises]=useState<Exercise[]>([]),[progress,setProgress]=useState<Progress>();
- const [active,setActive]=useState(false),[index,setIndex]=useState(0),[choice,setChoice]=useState('');
- const [result,setResult]=useState<Result>(),[busy,setBusy]=useState(false),[error,setError]=useState('');
+ const [page,setPage]=useState<'practice'|'library'|'history'|'questions'|'users'|'reports'>('practice'),[lesson,setLesson]=useState<Material>();
+ const [session,setSession]=useState<AuthSession>(),[exercise,setExercise]=useState<Exercise|null>(null);
+ const [choice,setChoice]=useState(''),[result,setResult]=useState<Result>(),[busy,setBusy]=useState(false),[error,setError]=useState('');
  const [attemptID,setAttemptID]=useState(()=>crypto.randomUUID());
- const [loading,setLoading]=useState(true),[leaderboardVersion,setLeaderboardVersion]=useState(0);const loadVersion=useRef(0);
- const refresh=()=>api<Progress>('/api/progress').then(setProgress);
- async function load(material?:Material){const version=++loadVersion.current;setLoading(true);setError('');setExercises([]);setActive(false);setIndex(0);setChoice('');setResult(undefined);setAttemptID(crypto.randomUUID());setLesson(material);setPage('practice');try{const [items,p,s]=await Promise.all([api<Exercise[]>('/api/exercises'+(material?'?materialId='+encodeURIComponent(material.id):'')),api<Progress>('/api/progress'),api<AuthSession>('/api/auth/session')]);if(version===loadVersion.current){setExercises(items);setProgress(p);setSession(s);setLeaderboardVersion(v=>v+1);if(new URLSearchParams(location.search).has('authError')){setError('GitHub sign-in could not be completed. Please try again.');history.replaceState(null,'',location.pathname)}}}catch(e){if(version===loadVersion.current)setError((e as Error).message)}finally{if(version===loadVersion.current)setLoading(false)}}
- useEffect(()=>{void load()},[]);
- async function submit(){if(!choice||busy)return;setBusy(true);setError('');try{
-  const r=await api<Result>('/api/attempts',json('POST',{id:attemptID,exerciseId:exercises[index].id,answer:choice}));
-  setResult(r);if(r.saved)setLeaderboardVersion(v=>v+1);await refresh();
- }catch(e){setError((e as Error).message)}finally{setBusy(false)}}
- function next(){setIndex(index+1);setChoice('');setResult(undefined);setAttemptID(crypto.randomUUID());setError('')}
- function start(){setIndex(0);setChoice('');setResult(undefined);setAttemptID(crypto.randomUUID());setActive(true)}
- async function signOut(){setBusy(true);try{await api('/api/auth/logout',{method:'POST'});setSession(s=>s?{...s,user:null}:s);await load()}catch(e){setError((e as Error).message)}finally{setBusy(false)}}
+ const [loading,setLoading]=useState(true),[leaderboardVersion,setLeaderboardVersion]=useState(0);
+ const loadVersion=useRef(0),loadController=useRef<AbortController|null>(null),guestAnswers=useRef<string[]>([]);
+
+ async function load(material?:Material,currentId=''){
+  const version=++loadVersion.current;
+  loadController.current?.abort();const controller=new AbortController();loadController.current=controller;
+  setLoading(true);setError('');setPage('practice');setLesson(material);
+  const params=new URLSearchParams();
+  if(material)params.set('materialId',material.id);
+  if(currentId)params.set('currentId',currentId);
+  if(!session?.user)for(const id of guestAnswers.current)params.append('answeredId',id);
+  try{
+   const [item,s]=await Promise.all([
+    api<Exercise|null>('/api/practice/question'+(params.size?'?'+params:''),{signal:controller.signal}),
+    api<AuthSession>('/api/auth/session',{signal:controller.signal}).then(s=>{if(version===loadVersion.current)setSession(s);return s}),
+   ]);
+   if(version!==loadVersion.current)return;
+   setExercise(item);setSession(s);setChoice('');setResult(undefined);setAttemptID(crypto.randomUUID());
+   if(new URLSearchParams(location.search).has('authError')){
+    setError('GitHub sign-in could not be completed. Please try again.');history.replaceState(null,'',location.pathname);
+   }
+  }catch(e){if(version===loadVersion.current&&!controller.signal.aborted)setError((e as Error).message)}
+  finally{if(version===loadVersion.current)setLoading(false)}
+ }
+ useEffect(()=>{void load();return()=>{loadVersion.current++;loadController.current?.abort()}},[]);
+ async function submit(){
+  if(!exercise||!choice.trim()||busy||loading||result)return;
+  setBusy(true);setError('');
+  try{
+   const r=await api<Result>('/api/attempts',json('POST',{id:attemptID,exerciseId:exercise.id,answer:choice}));
+   setResult(r);
+   if(r.saved)setLeaderboardVersion(v=>v+1);
+   else guestAnswers.current=[...new Set([...guestAnswers.current,exercise.id])].slice(-200);
+  }catch(e){setError((e as Error).message)}finally{setBusy(false)}
+ }
+ async function signOut(){
+  setBusy(true);
+  try{await api('/api/auth/logout',{method:'POST'});guestAnswers.current=[];setSession(s=>s?{...s,user:null}:s);await load()}
+  catch(e){setError((e as Error).message)}finally{setBusy(false)}
+ }
  const signIn=session?.githubEnabled?<a className="sign-in" href="/auth/github">Sign in with GitHub</a>:<button className="nav-button" disabled>Sign in with GitHub</button>;
- return <><header><a className="brand" href="/">puțin<span>ROMANIAN, A LITTLE EVERY DAY</span></a><nav aria-label="Main navigation"><button disabled={busy} className={page==='practice'?'nav-button current':'nav-button'} onClick={()=>void load()}>Practice</button>{session?.user?.isAdmin&&<><button disabled={busy} className={page==='library'?'nav-button current':'nav-button'} onClick={()=>setPage('library')}>Course library</button><button className={page==='questions'?'nav-button current':'nav-button'} onClick={()=>setPage('questions')}>Questions</button><button className={page==='users'?'nav-button current':'nav-button'} onClick={()=>setPage('users')}>Users</button></>}{session?.user?<><button className={page==='history'?'nav-button current':'nav-button'} onClick={()=>setPage('history')}>History</button><span className="account-name">{session.user.login}</span><button className="nav-button" disabled={busy} onClick={()=>void signOut()}>Sign out</button></>:signIn}</nav></header>
- {page!=='practice'&&!session?.user?<main className="auth-layout"><section className="card"><span className="eyebrow">YOUR LEARNING ACCOUNT</span><h1>Make room for your lessons.</h1><p>Sign in to keep your own practice history.</p>{signIn}{!session?<p>Checking sign-in…</p>:!session.githubEnabled&&<p className="note">Sign-in is currently unavailable. You can still practice published questions.</p>}</section></main>:page!=='practice'&&page!=='history'&&!session?.user?.isAdmin?<main className="auth-layout"><section className="card"><h1>Administrator access required.</h1><p>You can keep practising and viewing your history.</p><button onClick={()=>void load()}>Back to practice</button></section></main>:page==='questions'?<Questions/>:page==='users'&&session?.user?<Users currentUser={session.user}/>:page==='library'?<Library onPractice={m=>void load(m)}/>:page==='history'?<History/>:<main className="practice-layout"><aside><span className="eyebrow">YOUR PRACTICE SPACE</span><h1>A little today.<br/><em>More confidence tomorrow.</em></h1><p>Pick up the words you know. Put them to work. Leave with one small win.</p>{session?.user?<><div className="stats"><div><strong>{progress?.attempts??'—'}</strong><span>saved answers</span></div><div><strong>{progress?.practiced??'—'} / {progress?.available??'—'}</strong><span>practice questions answered correctly</span></div></div><p className="note">Your answers are saved to your account.</p></>:<div className="guest-note"><p>Practice freely. Anonymous answers are not saved.</p><p className="note">Sign in to keep your personal practice history.</p></div>}</aside>
- <section className="card" aria-label="Practice mission">
- {!active?<><span className="eyebrow">{lesson?'FROM YOUR COURSE MATERIALS':'YOUR PRACTICE QUESTIONS'}</span><div className="illustration" aria-hidden="true">✎</div><h2>{loading?'Finding your questions…':lesson?lesson.title:exercises.length?'A fresh mix for your practice':'Your practice starts here'}</h2><p>{lesson?'Recall the examples from your lesson, one question at a time.':exercises.length?'Start with the basics and build on them with published questions from your lessons.':'Publish questions from your course library to build your first practice set.'}</p>{!!exercises.length&&<><div className="tags"><span>{exercises.length} questions</span><span>{lesson?'Lesson practice':'Mixed practice'}</span></div></>}<button disabled={loading||!exercises.length} onClick={start}>Start a little practice <span>→</span></button>{!lesson&&exercises.length>1&&<button className="secondary shuffle" disabled={loading} onClick={()=>void load()}>Shuffle questions ↻</button>}{session?.user?.isAdmin&&<button className="text-button" onClick={()=>setPage('library')}>Open course library →</button>}{lesson&&<button className="text-button" onClick={()=>void load()}>Back to mixed practice</button>}</>:
- index>=exercises.length?<><span className="eyebrow">A SMALL WIN</span><div className="illustration">✓</div><h2>You showed up.</h2><p>{progress?.tracked?"Your answers are saved to your account.":"You practised anonymously; these answers were not saved."} Come back for another little practice.</p><button onClick={()=>void load(lesson)}>Back to today →</button></>:
- <><div className="step"><span className="eyebrow">{lesson?'LESSON PRACTICE':'MIXED PRACTICE'}</span><span>{index+1} / {exercises.length}</span></div><progress value={index} max={exercises.length}/><h2 className="exercise-prompt">{exercises[index].prompt}</h2>{exercises[index].kind==='cloze'?<div className="typed-answer"><label>Your answer<input lang="ro" autoComplete="off" autoCapitalize="none" spellCheck={false} value={choice} disabled={busy||!!result} onChange={e=>{setChoice(e.target.value);setAttemptID(crypto.randomUUID())}} onKeyDown={e=>{if(e.key==='Enter'&&!result)void submit()}}/></label><div className="diacritics" aria-label="Romanian letters">{['ă','â','î','ș','ț'].map(c=><button key={c} className="secondary" disabled={busy||!!result} onClick={()=>{setChoice(choice+c);setAttemptID(crypto.randomUUID())}}>{c}</button>)}</div></div>:<div className="options">{exercises[index].options.map(option=><button key={option} disabled={busy||!!result} className={choice===option?'option selected':'option'} onClick={()=>{setChoice(option);setAttemptID(crypto.randomUUID())}}>{option}</button>)}</div>}
- {result?<div className="feedback" role="status"><strong>{result.correct?'Nicely done.':'A useful one to remember.'}</strong><p>{!result.correct&&<>Answer: <strong lang="ro">{result.answer}</strong><br/></>}{result.explanation}</p>{result.sourceQuote&&<blockquote lang="ro">{result.sourceQuote}<cite>From the lesson</cite></blockquote>}<span>{result.saved?'Saved to your history':'Anonymous practice · answer not saved'}</span></div>:<p className="note">Give it a try. Mistakes are part of practice.</p>}
- {result?<button onClick={next}>{index===exercises.length-1?'Finish mission':'Next question'} →</button>:<button disabled={!choice||busy} onClick={()=>void submit()}>{busy?'Checking…':'Check answer'}</button>}</>}
- {error&&<div role="alert" className="error">{error} {!exercises.length&&<button onClick={()=>void load(lesson)}>Retry connection</button>}</div>}
- </section><Leaderboard user={session?.user} githubEnabled={!!session?.githubEnabled} refreshKey={leaderboardVersion}/></main>}<footer>Small steps. Real Romanian. <span>Built around your learning.</span></footer></>;
+ return <>
+  <header>
+   <a className="brand" href="/">puțin<span>ROMANIAN, A LITTLE EVERY DAY</span></a>
+   <nav aria-label="Main navigation">
+    <button disabled={busy} className={page==='practice'?'nav-button current':'nav-button'} onClick={()=>void load()}>Practice</button>
+    {session?.user?.isAdmin&&<>
+     <button disabled={busy} className={page==='library'?'nav-button current':'nav-button'} onClick={()=>setPage('library')}>Course library</button>
+     <button disabled={busy} className={page==='questions'?'nav-button current':'nav-button'} onClick={()=>setPage('questions')}>Questions</button>
+     <button disabled={busy} className={page==='reports'?'nav-button current':'nav-button'} onClick={()=>setPage('reports')}>Reports</button>
+     <button disabled={busy} className={page==='users'?'nav-button current':'nav-button'} onClick={()=>setPage('users')}>Users</button>
+    </>}
+    {session?.user?<>
+     <button disabled={busy} className={page==='history'?'nav-button current':'nav-button'} onClick={()=>setPage('history')}>History</button>
+     <div className="account-chip" aria-label={'Signed in as '+session.user.login}>
+      <Avatar login={session.user.login}/><span className="account-name" title={session.user.login}>{session.user.login}</span>
+      <button className="sign-out" aria-label="Sign out" title="Sign out" disabled={busy} onClick={()=>void signOut()}><SignOutIcon/></button>
+     </div>
+    </>:signIn}
+   </nav>
+  </header>
+  {page!=='practice'&&!session?.user?<main className="auth-layout"><section className="card"><span className="eyebrow">YOUR LEARNING ACCOUNT</span><h1>Make room for your lessons.</h1><p>Sign in to keep your own practice history.</p>{signIn}{!session?<p>Checking sign-in…</p>:!session.githubEnabled&&<p className="note">Sign-in is currently unavailable. You can still practice published questions.</p>}</section></main>
+  :page!=='practice'&&page!=='history'&&!session?.user?.isAdmin?<main className="auth-layout"><section className="card"><h1>Administrator access required.</h1><p>You can keep practising and viewing your history.</p><button onClick={()=>void load()}>Back to practice</button></section></main>
+  :page==='questions'?<Questions/>
+  :page==='reports'?<Reports/>
+  :page==='users'&&session?.user?<Users currentUser={session.user}/>
+  :page==='library'?<Library onPractice={m=>void load(m)}/>
+  :page==='history'?<History/>
+  :<main className="practice-layout">
+   <div className="practice-intro"><span className="eyebrow">YOUR PRACTICE SPACE</span><h1>A little today.<br/><em>More confidence tomorrow.</em></h1></div>
+   <section className="card practice-card" aria-label="Practice mission" aria-busy={loading}>
+    {loading?<div className="question-loading" role="status"><span className="generation-spinner" aria-hidden="true"/><p>Finding a question…</p></div>
+    :exercise?<>
+     <span className="eyebrow">{lesson?lesson.title:'MIXED PRACTICE'}</span>
+     <h2 className="exercise-prompt">{exercise.prompt}</h2>
+     {exercise.kind==='cloze'?<div className="typed-answer"><label>Your answer<input lang="ro" autoComplete="off" autoCapitalize="none" spellCheck={false} maxLength={200} value={choice} disabled={busy||!!result} onChange={e=>{setChoice(e.target.value);setAttemptID(crypto.randomUUID())}} onKeyDown={e=>{if(e.key==='Enter'&&!result)void submit()}}/></label><div className="diacritics" aria-label="Romanian letters">{['ă','â','î','ș','ț'].map(c=><button key={c} className="secondary" disabled={busy||!!result} onClick={()=>{setChoice(choice+c);setAttemptID(crypto.randomUUID())}}>{c}</button>)}</div></div>
+     :<div className="options">{exercise.options.map(option=><button key={option} disabled={busy||!!result} className={choice===option?'option selected':'option'} onClick={()=>{setChoice(option);setAttemptID(crypto.randomUUID())}}>{option}</button>)}</div>}
+     {result?<div className={'feedback '+(result.correct?'feedback-correct':'feedback-incorrect')} role="status"><strong>{result.correct?'Nicely done.':'Not quite. A useful one to remember.'}</strong><p>{!result.correct&&<>Answer: <strong lang="ro">{result.answer}</strong><br/></>}{result.explanation}</p><span>{result.saved?'Saved to your history':'Anonymous practice · answer not saved'}</span></div>
+     :<p className="note">{session?.user?'Give it a try. Mistakes are part of practice.':'Anonymous practice · answers are not saved.'}</p>}
+     {result?<button disabled={busy} onClick={()=>void load(lesson,exercise.id)}>Next question <span aria-hidden="true">→</span></button>
+     :<><button disabled={!choice.trim()||busy} onClick={()=>void submit()}>{busy?'Checking…':'Check answer'}</button><button className="secondary shuffle" disabled={busy} onClick={()=>void load(lesson,exercise.id)}>Shuffle question <span aria-hidden="true">↻</span></button></>}
+     {lesson&&<button className="text-button" disabled={busy} onClick={()=>void load()}>Back to mixed practice</button>}
+     <ReportQuestion key={exercise.id} exerciseId={exercise.id} disabled={busy}/>
+    </>:!error?<div className="empty-practice"><span className="eyebrow">YOUR PRACTICE QUESTIONS</span><h2>No practice questions yet.</h2><p>{session?.user?.isAdmin?'Publish questions from your course library to start practising.':'Published questions will appear here when they are ready.'}</p>{session?.user?.isAdmin&&<button onClick={()=>setPage('library')}>Open course library <span aria-hidden="true">→</span></button>}</div>:null}
+    {error&&<div role="alert" className="error">{error}<button className="text-button" disabled={loading||busy} onClick={()=>void load(lesson,exercise?.id)}>Retry connection</button></div>}
+   </section>
+   <Leaderboard user={session?.user} githubEnabled={!!session?.githubEnabled} refreshKey={leaderboardVersion}/>
+  </main>}
+  <footer>Small steps. Real Romanian. <span>Built around your learning.</span></footer>
+ </>;
 }
 createRoot(document.getElementById('root')!).render(<App/>);

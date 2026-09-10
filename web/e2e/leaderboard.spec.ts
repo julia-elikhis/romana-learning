@@ -14,7 +14,7 @@ const dates={weekStart:'2026-09-07T00:00:00Z',weekEnd:'2026-09-14T00:00:00Z'};
 test('leaderboard shows top learners and own rank, refreshing after a saved answer',async({page,request},testInfo)=>{
  let score=2;
  await page.route('**/api/leaderboard',route=>route.fulfill({json:{entries,you:{rank:6,login:'my-romanian-practice',score,isYou:true},participants:7,...dates}}));
- const deckResponse=page.waitForResponse(r=>new URL(r.url()).pathname==='/api/exercises');
+ const deckResponse=page.waitForResponse(r=>new URL(r.url()).pathname==='/api/practice/question');
  await page.goto('/');const deck=await(await deckResponse).json();
  const widget=page.getByRole('region',{name:'Leaderboard',exact:true});
  await expect(widget.getByRole('listitem')).toHaveCount(6);
@@ -25,10 +25,9 @@ test('leaderboard shows top learners and own rank, refreshing after a saved answ
  const mission=page.getByRole('region',{name:'Practice mission'});
  const missionBox=await mission.boundingBox(),widgetBox=await widget.boundingBox();
  if(page.viewportSize()!.width<=800)expect(widgetBox!.y).toBeGreaterThan(missionBox!.y+missionBox!.height);
- else expect(widgetBox!.x).toBeLessThan(missionBox!.x);
+ else {expect(widgetBox!.x).toBeLessThan(missionBox!.x);expect(Math.abs(widgetBox!.y-missionBox!.y)).toBeLessThan(2)}
  const questions=await(await request.get('/api/admin/questions')).json();
- const answer=questions.questions.find((q:{id:string})=>q.id===deck[0].id).answers[0];
- await page.getByRole('button',{name:'Start a little practice'}).click();
+ const answer=questions.questions.find((q:{id:string})=>q.id===deck.id).answers[0];
  const typed=page.getByLabel('Your answer',{exact:true});
  if(await typed.count())await typed.fill(answer);else await page.locator('.options').getByRole('button',{name:answer,exact:true}).click();
  score=3;
@@ -46,11 +45,11 @@ test('guest leaderboard handles errors and an empty week without blocking practi
  await page.goto('/');
  const widget=page.getByRole('region',{name:'Leaderboard',exact:true});
  await expect(widget.getByText('The leaderboard is unavailable right now.')).toBeVisible();
- await expect(page.getByRole('button',{name:'Start a little practice'})).toBeEnabled();
+ await expect(page.getByRole('button',{name:'Shuffle question',exact:true})).toBeEnabled();
  unavailable=false;
  await widget.getByRole('button',{name:'Retry leaderboard'}).click();
  await expect(widget.getByText('A fresh week starts here.')).toBeVisible();
  await expect(widget.getByRole('link',{name:'Sign in to join the leaderboard'})).toHaveAttribute('href','/auth/github');
  await expect(widget.getByRole('listitem')).toHaveCount(0);
- await expect(page.getByRole('button',{name:'Start a little practice'})).toBeEnabled();
+ await expect(page.getByRole('button',{name:'Shuffle question',exact:true})).toBeEnabled();
 });

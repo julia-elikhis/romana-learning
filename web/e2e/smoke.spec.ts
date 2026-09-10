@@ -10,7 +10,7 @@ test('public practice works without saving history or allowing uploads',async({p
  const {exercises}=await(await request.get('/api/materials/'+id)).json();
  expect((await request.post('/api/drafts/'+exercises[0].id+'/status',{data:{status:'published',reviewed:true}})).ok()).toBe(true);
  await page.goto('/');await page.getByRole('button',{name:'Sign out',exact:true}).click();
- await expect(page.getByText('Practice freely. Anonymous answers are not saved.',{exact:true})).toBeVisible();
+ await expect(page.getByText('Anonymous practice · answers are not saved.',{exact:true})).toBeVisible();
  await expect(page.getByRole('button',{name:'Course library',exact:true})).toHaveCount(0);
  await expect(page.getByRole('button',{name:'Questions',exact:true})).toHaveCount(0);
  await expect(page.getByLabel('Document',{exact:true})).toHaveCount(0);
@@ -18,14 +18,14 @@ test('public practice works without saving history or allowing uploads',async({p
  expect((await request.post('/api/materials/'+id+'/generate',{data:{count:5,mode:'local'}})).status()).toBe(401);
  expect((await request.get('/api/history')).status()).toBe(401);
  await page.getByRole('button',{name:'Practice',exact:true}).click();
- await page.getByRole('button',{name:'Start a little practice'}).click();
+ await expect(page.locator('.exercise-prompt')).toBeVisible();
  const typed=page.getByLabel('Your answer',{exact:true});
  if(await typed.count())await typed.fill('sunt');else await page.locator('.options button').first().click();
  const answer=page.waitForResponse(r=>r.url().endsWith('/api/attempts')&&r.request().method()==='POST');
  await page.getByRole('button',{name:'Check answer'}).click();expect((await(await answer).json()).saved).toBe(false);
  await expect(page.getByText('Anonymous practice · answer not saved',{exact:true})).toBeVisible();
  const progress=await(await request.get('/api/progress')).json();expect(progress.tracked).toBe(false);expect(progress.attempts).toBe(0);
- await page.reload();await expect(page.getByText('Practice freely. Anonymous answers are not saved.',{exact:true})).toBeVisible();
+ await page.reload();await expect(page.getByText('Anonymous practice · answers are not saved.',{exact:true})).toBeVisible();
  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);
  await page.screenshot({path:join(tmpdir(),`romana-practice-${testInfo.project.name}.png`),fullPage:true});
 });

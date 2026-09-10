@@ -52,7 +52,7 @@ test('admins can grant and revoke roles and learners cannot manage content',asyn
   expect((await request.patch('/api/admin/users/'+other.userID,{data:{isAdmin:false}})).ok()).toBe(true);
   const learnerPage=await learner.newPage();await learnerPage.goto(baseURL!);
   await expect(learnerPage.getByRole('button',{name:'History',exact:true})).toBeVisible();
-  for(const name of ['Course library','Questions','Users'])await expect(learnerPage.getByRole('button',{name,exact:true})).toHaveCount(0);
+  for(const name of ['Course library','Questions','Users','Reports'])await expect(learnerPage.getByRole('button',{name,exact:true})).toHaveCount(0);
   expect((await learner.request.get(baseURL+'/api/admin/questions')).status()).toBe(403);
   expect((await learner.request.post(baseURL+'/api/materials',{data:{}})).status()).toBe(403);
   await page.goto('/');await page.getByRole('button',{name:'Users',exact:true}).click();

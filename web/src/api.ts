@@ -13,6 +13,8 @@ export type ManagedQuestion=Draft&{materialId:string;materialTitle:string};
 export type QuestionPage={questions:ManagedQuestion[];total:number;page:number;pageSize:number};
 export type LeaderboardEntry={rank:number;login:string;score:number;isYou:boolean};
 export type LeaderboardData={entries:LeaderboardEntry[];you:LeaderboardEntry|null;participants:number;weekStart:string;weekEnd:string};
+export type QuestionReport={id:string;exerciseId:string;prompt:string;note:string;reporter:string;status:'open'|'resolved';createdAt:string;question:Draft|null};
+export type ReportPage={reports:QuestionReport[];total:number;page:number;pageSize:number};
 export async function api<T>(path:string,init?:RequestInit):Promise<T>{
  const response=await fetch(path,init);let data;
  try{data=await response.json()}catch{throw new Error('The server could not complete this request. Please retry.')}
