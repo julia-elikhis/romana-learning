@@ -55,7 +55,7 @@ func (s Server) adminQuestions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	const pageSize = 30
-	rows, err := tx.QueryContext(ctx, `SELECT e.id,e.kind,e.prompt,e.options,e.answers,e.explanation,e.source_quote,e.source_line,e.status,coalesce(e.material_id,''),coalesce(m.title,'Starter questions')`+from+` ORDER BY e.created_at DESC,e.id LIMIT $3 OFFSET $4`, status, q, pageSize, (page-1)*pageSize)
+	rows, err := tx.QueryContext(ctx, `SELECT e.id,e.kind,e.prompt,e.options,e.answers,e.explanation,e.source_quote,e.source_line,e.status,e.skill,e.target,e.difficulty,coalesce(e.material_id,''),coalesce(m.title,'Starter questions')`+from+` ORDER BY e.created_at DESC,e.id LIMIT $3 OFFSET $4`, status, q, pageSize, (page-1)*pageSize)
 	if err != nil {
 		fail(w, 503, "Could not load questions")
 		return
@@ -65,7 +65,7 @@ func (s Server) adminQuestions(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var item ManagedQuestion
 		var options, answers []byte
-		if rows.Scan(&item.ID, &item.Kind, &item.Prompt, &options, &answers, &item.Explanation, &item.SourceQuote, &item.SourceLine, &item.Status, &item.MaterialID, &item.MaterialTitle) != nil || json.Unmarshal(options, &item.Options) != nil || json.Unmarshal(answers, &item.Answers) != nil {
+		if rows.Scan(&item.ID, &item.Kind, &item.Prompt, &options, &answers, &item.Explanation, &item.SourceQuote, &item.SourceLine, &item.Status, &item.Skill, &item.Target, &item.Difficulty, &item.MaterialID, &item.MaterialTitle) != nil || json.Unmarshal(options, &item.Options) != nil || json.Unmarshal(answers, &item.Answers) != nil {
 			fail(w, 503, "Could not read questions")
 			return
 		}
@@ -91,6 +91,9 @@ type questionEdit struct {
 	Options     []string `json:"options"`
 	Answers     []string `json:"answers"`
 	Explanation string   `json:"explanation"`
+	Skill       *string  `json:"skill,omitempty"`
+	Target      *string  `json:"target,omitempty"`
+	Difficulty  *string  `json:"difficulty,omitempty"`
 }
 
 func (s Server) bulkPublish(w http.ResponseWriter, r *http.Request) {
@@ -137,7 +140,7 @@ func (s Server) bulkPublish(w http.ResponseWriter, r *http.Request) {
 			edit.Options = []string{}
 		}
 		if d.Status == "published" && d.Kind == edit.Kind && d.Prompt == edit.Prompt &&
-			slices.Equal(d.Options, edit.Options) && slices.Equal(d.Answers, edit.Answers) && d.Explanation == edit.Explanation {
+			slices.Equal(d.Options, edit.Options) && slices.Equal(d.Answers, edit.Answers) && d.Explanation == edit.Explanation && (edit.Skill == nil || d.Skill == *edit.Skill) && (edit.Target == nil || d.Target == *edit.Target) && (edit.Difficulty == nil || d.Difficulty == *edit.Difficulty) {
 			continue // A lost response can safely be retried without changing published questions.
 		}
 		if d.Status != "draft" {
@@ -145,14 +148,23 @@ func (s Server) bulkPublish(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		d.Kind, d.Prompt, d.Options, d.Answers, d.Explanation = edit.Kind, edit.Prompt, edit.Options, edit.Answers, edit.Explanation
+		if edit.Skill != nil {
+			d.Skill = *edit.Skill
+		}
+		if edit.Target != nil {
+			d.Target = *edit.Target
+		}
+		if edit.Difficulty != nil {
+			d.Difficulty = *edit.Difficulty
+		}
 		if err = materials.Validate(d); err != nil {
 			fail(w, 400, "A selected question has invalid text or answers. Nothing was published: "+err.Error())
 			return
 		}
 		options, _ := json.Marshal(d.Options)
 		answers, _ := json.Marshal(d.Answers)
-		if _, err = tx.ExecContext(ctx, `UPDATE exercises SET kind=$2,prompt=$3,options=$4,answers=$5,explanation=$6,status='published' WHERE id=$1`,
-			d.ID, d.Kind, d.Prompt, string(options), string(answers), d.Explanation); err != nil {
+		if _, err = tx.ExecContext(ctx, `UPDATE exercises SET kind=$2,prompt=$3,options=$4,answers=$5,explanation=$6,status='published',skill=$7,target=$8,difficulty=$9 WHERE id=$1`,
+			d.ID, d.Kind, d.Prompt, string(options), string(answers), d.Explanation, d.Skill, d.Target, d.Difficulty); err != nil {
 			fail(w, 503, "Could not publish selected questions")
 			return
 		}

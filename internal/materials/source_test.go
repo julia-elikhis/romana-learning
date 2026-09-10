@@ -29,7 +29,7 @@ func TestMixedNotesExcludeHebrewFromBothModelPasses(t *testing.T) {
 		}
 		var output any
 		if calls == 1 {
-			output = map[string]any{"exercises": []Draft{{Kind: "cloze", Prompt: "Use a fi in the present: Eu ____ acasă.", Answers: []string{"sunt"}, Explanation: "Eu takes sunt. The lesson's este is a mistake.", SourceQuote: "Eu este acasă."}}}
+			output = map[string]any{"exercises": []Draft{{Kind: "cloze", Prompt: "Use a fi in the present: Eu ____ acasă.", Answers: []string{"sunt"}, Explanation: "Eu takes sunt. The lesson's este is a mistake.", SourceQuote: "Eu este acasă.", Skill: "grammar", Target: "a fi / eu", Difficulty: "easy"}}}
 		} else {
 			var input struct{ Questions []Draft }
 			if json.Unmarshal([]byte(request.Messages[1].Content), &input) != nil || len(input.Questions) != 1 {
@@ -43,14 +43,14 @@ func TestMixedNotesExcludeHebrewFromBothModelPasses(t *testing.T) {
 	defer server.Close()
 	api, _ := NewAPI(server.URL, "", "test-model")
 	api.client.Transport = server.Client().Transport
-	result, err := api.Generate(context.Background(), source, "lesson", 5)
+	result, err := api.Generate(context.Background(), source, "lesson", 1)
 	if err != nil || len(result.Exercises) != 1 || calls != 2 {
 		t.Fatalf("Correction failed: %v", err)
 	}
 	if result.Exercises[0].SourceLine != 2 || result.Exercises[0].SourceQuote != "Eu este acasă." {
 		t.Fatal("Correction lost original evidence location")
 	}
-	if _, err = api.Generate(context.Background(), "רק עברית", "lesson", 5); err == nil || calls != 2 {
+	if _, err = api.Generate(context.Background(), "רק עברית", "lesson", 1); err == nil || calls != 2 {
 		t.Fatal("An all-Hebrew source reached the model")
 	}
 	bad := result.Exercises[0]

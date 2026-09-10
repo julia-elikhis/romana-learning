@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 
 	"github.com/julia-elikhis/romana-learning/internal/materials"
@@ -19,7 +20,7 @@ func TestAIGenerationSavesOnlyAfterLanguageApproval(t *testing.T) {
 		calls++
 		var output any
 		if calls%2 == 1 {
-			output = map[string]any{"exercises": []materials.Draft{{Kind: "cloze", Prompt: "Eu ____ acasă.", Answers: []string{"sunt"}, Explanation: "Eu sunt means I am.", SourceQuote: "Eu sunt acasă."}}}
+			output = map[string]any{"exercises": []materials.Draft{{Kind: "cloze", Prompt: "Eu ____ acasă.", Answers: []string{"sunt"}, Explanation: "Eu sunt means I am.", SourceQuote: "Eu sunt acasă.", Skill: "grammar", Target: "a fi / eu", Difficulty: "easy"}}}
 		} else {
 			var request struct {
 				Messages []struct{ Content string } `json:"messages"`
@@ -57,10 +58,10 @@ func TestAIGenerationSavesOnlyAfterLanguageApproval(t *testing.T) {
 	if _, err := db.Exec(`UPDATE materials SET reviewed=false WHERE id=$1`, id); err != nil {
 		t.Fatal(err)
 	}
-	payload := map[string]any{"count": 5, "mode": "api"}
+	payload := map[string]any{"count": 1, "mode": "api"}
 	questionRequest(t, handler, "POST", "/api/materials/"+id+"/generate", payload, 422)
 	var count int
-	if err := db.QueryRow(`SELECT count(*) FROM exercises WHERE material_id=$1`, id).Scan(&count); err != nil || count != 0 || calls != 2 {
+	if err := db.QueryRow(`SELECT count(*) FROM exercises WHERE material_id=$1`, id).Scan(&count); err != nil || count != 0 || calls != 4 {
 		t.Fatal("Rejected language review persisted questions or skipped its separate request")
 	}
 	approved = true
@@ -68,9 +69,20 @@ func TestAIGenerationSavesOnlyAfterLanguageApproval(t *testing.T) {
 	var result struct {
 		Count            int
 		LanguageReviewed bool
+		Mix              materials.GenerationSummary
 	}
-	if json.Unmarshal(response, &result) != nil || result.Count != 1 || !result.LanguageReviewed || calls != 4 {
+	if json.Unmarshal(response, &result) != nil || result.Count != 1 || !result.LanguageReviewed || calls != 6 {
 		t.Fatal("Approved generation did not report its completed language review")
+	}
+	var detail struct {
+		GenerationSummary materials.GenerationSummary
+		Exercises         []materials.Draft
+	}
+	if json.Unmarshal(questionRequest(t, handler, "GET", "/api/materials/"+id, nil, 200), &detail) != nil || !reflect.DeepEqual(detail.GenerationSummary, result.Mix) || !reflect.DeepEqual(result.Mix.Created, materials.PracticeMix(1)) {
+		t.Fatal("Saved generation mix does not match the actual created formats")
+	}
+	if len(detail.Exercises) != 1 || detail.Exercises[0].Skill != "grammar" || detail.Exercises[0].Target != "a fi / eu" || detail.Exercises[0].Difficulty != "easy" {
+		t.Fatal("Generated learning focus was not preserved")
 	}
 	var status, version string
 	if err := db.QueryRow(`SELECT status,generator_version FROM exercises WHERE material_id=$1`, id).Scan(&status, &version); err != nil || status != "draft" || version != materials.APIGeneratorVersion {

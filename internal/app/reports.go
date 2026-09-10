@@ -95,7 +95,7 @@ func (s Server) adminReports(w http.ResponseWriter, r *http.Request) {
 	rows, err := s.DB.QueryContext(ctx, `SELECT r.id,r.exercise_id,r.question_prompt,r.note,COALESCE(u.login,''),r.status,r.created_at,
  CASE WHEN e.status='deleted' THEN 'null'::jsonb ELSE jsonb_build_object(
  'id',e.id,'kind',e.kind,'prompt',e.prompt,'options',e.options,'answers',e.answers,
- 'explanation',e.explanation,'sourceQuote',e.source_quote,'sourceLine',e.source_line,'status',e.status) END
+ 'explanation',e.explanation,'sourceQuote',e.source_quote,'sourceLine',e.source_line,'status',e.status,'skill',e.skill,'target',e.target,'difficulty',e.difficulty) END
  FROM question_reports r JOIN exercises e ON e.id=r.exercise_id
  LEFT JOIN app_users u ON u.id=r.reporter_id
  WHERE r.status=$1 ORDER BY r.created_at,r.id LIMIT $2 OFFSET $3`, status, pageSize, (page-1)*pageSize)

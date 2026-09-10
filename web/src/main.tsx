@@ -14,10 +14,11 @@ import {Reports} from './Reports';
 function App(){
  const [page,setPage]=useState<'practice'|'library'|'history'|'questions'|'users'|'reports'>('practice'),[lesson,setLesson]=useState<Material>();
  const [session,setSession]=useState<AuthSession>(),[exercise,setExercise]=useState<Exercise|null>(null);
+ const [selections,setSelections]=useState<string[]>([]);
  const [choice,setChoice]=useState(''),[result,setResult]=useState<Result>(),[busy,setBusy]=useState(false),[error,setError]=useState('');
  const [attemptID,setAttemptID]=useState(()=>crypto.randomUUID());
  const [loading,setLoading]=useState(true),[leaderboardVersion,setLeaderboardVersion]=useState(0);
- const loadVersion=useRef(0),loadController=useRef<AbortController|null>(null),guestAnswers=useRef<string[]>([]);
+ const loadVersion=useRef(0),loadController=useRef<AbortController|null>(null),guestAnswers=useRef<string[]>([]),recentQuestions=useRef<string[]>([]);
 
  async function load(material?:Material,currentId=''){
   const version=++loadVersion.current;
@@ -26,6 +27,7 @@ function App(){
   const params=new URLSearchParams();
   if(material)params.set('materialId',material.id);
   if(currentId)params.set('currentId',currentId);
+  for(const id of recentQuestions.current)params.append('recentId',id);
   if(!session?.user)for(const id of guestAnswers.current)params.append('answeredId',id);
   try{
    const [item,s]=await Promise.all([
@@ -33,7 +35,9 @@ function App(){
     api<AuthSession>('/api/auth/session',{signal:controller.signal}).then(s=>{if(version===loadVersion.current)setSession(s);return s}),
    ]);
    if(version!==loadVersion.current)return;
-   setExercise(item);setSession(s);setChoice('');setResult(undefined);setAttemptID(crypto.randomUUID());
+   setExercise(item);setSession(s);setChoice('');setSelections([]);
+   if(item)recentQuestions.current=[item.id,...recentQuestions.current].slice(0,8);
+   setResult(undefined);setAttemptID(crypto.randomUUID());
    if(new URLSearchParams(location.search).has('authError')){
     setError('GitHub sign-in could not be completed. Please try again.');history.replaceState(null,'',location.pathname);
    }
@@ -42,10 +46,10 @@ function App(){
  }
  useEffect(()=>{void load();return()=>{loadVersion.current++;loadController.current?.abort()}},[]);
  async function submit(){
-  if(!exercise||!choice.trim()||busy||loading||result)return;
+  if(!exercise||(exercise.kind==='multi_select'?!selections.length:!choice.trim())||busy||loading||result)return;
   setBusy(true);setError('');
   try{
-   const r=await api<Result>('/api/attempts',json('POST',{id:attemptID,exerciseId:exercise.id,answer:choice}));
+   const r=await api<Result>('/api/attempts',json('POST',{id:attemptID,exerciseId:exercise.id,...(exercise.kind==='multi_select'?{selections}:{answer:choice})}));
    setResult(r);
    if(r.saved)setLeaderboardVersion(v=>v+1);
    else guestAnswers.current=[...new Set([...guestAnswers.current,exercise.id])].slice(-200);
@@ -53,7 +57,7 @@ function App(){
  }
  async function signOut(){
   setBusy(true);
-  try{await api('/api/auth/logout',{method:'POST'});guestAnswers.current=[];setSession(s=>s?{...s,user:null}:s);await load()}
+  try{await api('/api/auth/logout',{method:'POST'});guestAnswers.current=[];recentQuestions.current=[];setSession(s=>s?{...s,user:null}:s);await load()}
   catch(e){setError((e as Error).message)}finally{setBusy(false)}
  }
  const signIn=session?.githubEnabled?<a className="sign-in" href="/auth/github">Sign in with GitHub</a>:<button className="nav-button" disabled>Sign in with GitHub</button>;
@@ -92,11 +96,12 @@ function App(){
      <span className="eyebrow">{lesson?lesson.title:'MIXED PRACTICE'}</span>
      <h2 className="exercise-prompt">{exercise.prompt}</h2>
      {exercise.kind==='cloze'?<div className="typed-answer"><label>Your answer<input lang="ro" autoComplete="off" autoCapitalize="none" spellCheck={false} maxLength={200} value={choice} disabled={busy||!!result} onChange={e=>{setChoice(e.target.value);setAttemptID(crypto.randomUUID())}} onKeyDown={e=>{if(e.key==='Enter'&&!result)void submit()}}/></label><div className="diacritics" aria-label="Romanian letters">{['ă','â','î','ș','ț'].map(c=><button key={c} className="secondary" disabled={busy||!!result} onClick={()=>{setChoice(choice+c);setAttemptID(crypto.randomUUID())}}>{c}</button>)}</div></div>
+     :exercise.kind==='multi_select'?<fieldset className="multi-options" disabled={busy||!!result}><legend>Select all correct answers</legend><div className="options">{exercise.options.map(option=><label key={option} className={'option multi-option'+(selections.includes(option)?' selected':'')}><input type="checkbox" checked={selections.includes(option)} onChange={e=>{const checked=e.target.checked;setSelections(prev=>checked?[...prev,option]:prev.filter(value=>value!==option));setAttemptID(crypto.randomUUID())}}/><span lang="ro">{option}</span></label>)}</div></fieldset>
      :<div className="options">{exercise.options.map(option=><button key={option} disabled={busy||!!result} className={choice===option?'option selected':'option'} onClick={()=>{setChoice(option);setAttemptID(crypto.randomUUID())}}>{option}</button>)}</div>}
-     {result?<div className={'feedback '+(result.correct?'feedback-correct':'feedback-incorrect')} role="status"><strong>{result.correct?'Nicely done.':'Not quite. A useful one to remember.'}</strong><p>{!result.correct&&<>Answer: <strong lang="ro">{result.answer}</strong><br/></>}{result.explanation}</p><span>{result.saved?'Saved to your history':'Anonymous practice · answer not saved'}</span></div>
+     {result?<div className={'feedback '+(result.correct?'feedback-correct':'feedback-incorrect')} role="status"><strong>{result.correct?'Nicely done.':'Not quite. A useful one to remember.'}</strong>{!result.correct&&(result.answers?.length?<div className="correct-selections"><strong>Correct answers:</strong><ul>{result.answers.map(answer=><li lang="ro" key={answer}>{answer}</li>)}</ul></div>:<p>Answer: <strong lang="ro">{result.answer}</strong></p>)}<p>{result.explanation}</p><span>{result.saved?'Saved to your history':'Anonymous practice · answer not saved'}</span></div>
      :<p className="note">{session?.user?'Give it a try. Mistakes are part of practice.':'Anonymous practice · answers are not saved.'}</p>}
      {result?<button disabled={busy} onClick={()=>void load(lesson,exercise.id)}>Next question <span aria-hidden="true">→</span></button>
-     :<><button disabled={!choice.trim()||busy} onClick={()=>void submit()}>{busy?'Checking…':'Check answer'}</button><button className="secondary shuffle" disabled={busy} onClick={()=>void load(lesson,exercise.id)}>Shuffle question <span aria-hidden="true">↻</span></button></>}
+     :<><button disabled={(exercise.kind==='multi_select'?!selections.length:!choice.trim())||busy} onClick={()=>void submit()}>{busy?'Checking…':'Check answer'}</button><button className="secondary shuffle" disabled={busy} onClick={()=>void load(lesson,exercise.id)}>Shuffle question <span aria-hidden="true">↻</span></button></>}
      {lesson&&<button className="text-button" disabled={busy} onClick={()=>void load()}>Back to mixed practice</button>}
      <ReportQuestion key={exercise.id} exerciseId={exercise.id} disabled={busy}/>
     </>:!error?<div className="empty-practice"><span className="eyebrow">YOUR PRACTICE QUESTIONS</span><h2>No practice questions yet.</h2><p>{session?.user?.isAdmin?'Publish questions from your course library to start practising.':'Published questions will appear here when they are ready.'}</p>{session?.user?.isAdmin&&<button onClick={()=>setPage('library')}>Open course library <span aria-hidden="true">→</span></button>}</div>:null}

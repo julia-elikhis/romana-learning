@@ -29,10 +29,8 @@ func TestLanguageReviewRejectsBadRomanianEvenWhenCopiedFromDocument(t *testing.T
 			return
 		}
 		var output any
-		if calls == 1 {
-			output = map[string]any{"exercises": []Draft{unsupported, incorrect, correct}}
-		} else {
-			if calls != 2 || len(request.Messages) != 2 || request.Messages[0].Content != romanianReviewInstruction || request.Messages[1].Role != "user" {
+		{
+			if calls != 1 || len(request.Messages) != 2 || request.Messages[0].Content != romanianReviewInstruction || request.Messages[1].Role != "user" {
 				t.Error("Language review reused the generation conversation or made extra calls")
 			}
 			var input struct {
@@ -55,11 +53,15 @@ func TestLanguageReviewRejectsBadRomanianEvenWhenCopiedFromDocument(t *testing.T
 	defer server.Close()
 	api, _ := NewAPI(server.URL, "", "test-model")
 	api.client.Transport = server.Client().Transport
-	result, err := api.Generate(context.Background(), source, "lesson", 3)
+	candidates, err := validateGenerated([]Draft{unsupported, incorrect, correct}, source, "lesson")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if calls != 2 || len(result.Exercises) != 1 || result.Exercises[0].Prompt != correct.Prompt || result.Exercises[0].Status != "draft" {
+	result, err := api.reviewRomanian(context.Background(), source, candidates)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 || len(result.Exercises) != 1 || result.Exercises[0].Prompt != correct.Prompt || result.Exercises[0].Status != "draft" {
 		t.Fatal("Unreviewed or linguistically rejected content was retained")
 	}
 	if len(result.Skipped) != 2 || result.Skipped[0].Question != 1 || result.Skipped[1].Question != 2 || !strings.Contains(result.Skipped[1].Reason, "Romanian review") {

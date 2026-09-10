@@ -25,6 +25,9 @@ var adminRolesMigration string
 //go:embed migrations/007_question_reports.sql
 var questionReportsMigration string
 
+//go:embed migrations/008_exercise_variety.sql
+var exerciseVarietyMigration string
+
 func Migrate(ctx context.Context, db *sql.DB) error {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
@@ -113,6 +116,17 @@ func Migrate(ctx context.Context, db *sql.DB) error {
 			return err
 		}
 		if _, err = tx.ExecContext(ctx, `INSERT INTO schema_migrations(version) VALUES(7)`); err != nil {
+			return err
+		}
+	}
+	if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version=8)`).Scan(&installed); err != nil {
+		return err
+	}
+	if !installed {
+		if _, err = tx.ExecContext(ctx, exerciseVarietyMigration); err != nil {
+			return err
+		}
+		if _, err = tx.ExecContext(ctx, `INSERT INTO schema_migrations(version) VALUES(8)`); err != nil {
 			return err
 		}
 	}

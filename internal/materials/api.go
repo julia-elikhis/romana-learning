@@ -17,7 +17,7 @@ import (
 	"time"
 )
 
-const APIGeneratorVersion = "chat-completions-reviewed-v3"
+const APIGeneratorVersion = "chat-completions-reviewed-v4"
 
 const apiRequestTimeout = 55 * time.Second
 const GenerationTimeout = 2*apiRequestTimeout + 10*time.Second
@@ -85,6 +85,7 @@ type GenerationIssue struct {
 type GenerationResult struct {
 	Exercises []Draft
 	Skipped   []GenerationIssue
+	Summary   GenerationSummary
 	positions map[string]int
 }
 
@@ -105,21 +106,7 @@ func (a *API) Generate(ctx context.Context, source, materialID string, count int
 	if len(inputSource) > 30000 {
 		return GenerationResult{}, errors.New("For API generation, shorten the Romanian and English teaching text to 30 KB or split it into lessons")
 	}
-	content, err := a.chat(ctx, exerciseInstruction, fmt.Sprintf("Create at most %d exercises from this source. Source begins after the next newline.\n%s", count, inputSource))
-	if err != nil {
-		return GenerationResult{}, err
-	}
-	var output struct {
-		Exercises []Draft `json:"exercises"`
-	}
-	if json.Unmarshal([]byte(content), &output) != nil || len(output.Exercises) == 0 || len(output.Exercises) > count {
-		return GenerationResult{}, errors.New("Generation API returned invalid exercise JSON")
-	}
-	generated, err := validateGenerated(output.Exercises, source, materialID)
-	if err != nil {
-		return GenerationResult{}, err
-	}
-	return a.reviewRomanian(ctx, inputSource, generated)
+	return a.generateMixed(ctx, inputSource, source, materialID, count)
 }
 
 // Each pass starts a fresh conversation with the same private provider settings.
@@ -177,7 +164,7 @@ func validateGenerated(candidates []Draft, source, materialID string) (Generatio
 	result := GenerationResult{Exercises: []Draft{}, Skipped: []GenerationIssue{}, positions: map[string]int{}}
 	seen := map[string]bool{}
 	for i, d := range candidates {
-		if strings.Count(d.Prompt, "____") != 1 {
+		if d.Kind == "cloze" && strings.Count(d.Prompt, "____") != 1 {
 			result.Skipped = append(result.Skipped, GenerationIssue{i + 1, "A generated question needs exactly one ____ gap"})
 			continue
 		}
@@ -187,7 +174,7 @@ func validateGenerated(candidates []Draft, source, materialID string) (Generatio
 			result.Skipped = append(result.Skipped, GenerationIssue{i + 1, "The source quote must be copied exactly from the teaching text"})
 			continue
 		}
-		if !latinText(d.SourceQuote + d.Prompt + d.Explanation + strings.Join(d.Answers, " ") + strings.Join(d.Options, " ")) {
+		if !latinText(d.SourceQuote + d.Prompt + d.Explanation + d.Target + strings.Join(d.Answers, " ") + strings.Join(d.Options, " ")) {
 			result.Skipped = append(result.Skipped, GenerationIssue{i + 1, "Use Romanian questions and English explanations; ignore other-language annotations"})
 			continue
 		}
@@ -215,7 +202,7 @@ func validateGenerated(candidates []Draft, source, materialID string) (Generatio
 	if len(result.Exercises) == 0 {
 		if len(result.Skipped) > 0 {
 			first := result.Skipped[0]
-			return GenerationResult{}, fmt.Errorf("The AI returned no valid questions. Question %d: %s. Nothing was saved; try generating again", first.Question, first.Reason)
+			return result, fmt.Errorf("The AI returned no valid questions. Question %d: %s. Nothing was saved; try generating again", first.Question, first.Reason)
 		}
 		return GenerationResult{}, errors.New("The AI returned no questions. Nothing was saved; try generating again")
 	}

@@ -93,7 +93,7 @@ func (s Server) library(w http.ResponseWriter, r *http.Request) {
 		fail(w, 503, "Could not read course materials")
 		return
 	}
-	respond(w, 200, map[string]any{"enabled": s.Files != nil, "apiEnabled": s.Generator.Ready(), "generator": materials.GeneratorVersion, "materials": list})
+	respond(w, 200, map[string]any{"enabled": s.Files != nil, "apiEnabled": s.Generator.Ready(), "generator": materials.GeneratorVersion, "materials": list, "generationMixes": map[string]map[string]int{"5": materials.PracticeMix(5), "10": materials.PracticeMix(10), "20": materials.PracticeMix(20)}})
 }
 func (s Server) upload(w http.ResponseWriter, r *http.Request) {
 	if s.Files == nil {
@@ -205,12 +205,12 @@ func (s Server) upload(w http.ResponseWriter, r *http.Request) {
 	respond(w, 201, map[string]any{"id": id, "duplicate": false})
 }
 
-const exerciseFields = `id,kind,prompt,options,answers,explanation,source_quote,source_line,status`
+const exerciseFields = `id,kind,prompt,options,answers,explanation,source_quote,source_line,status,skill,target,difficulty`
 
 func scanDraft(row interface{ Scan(...any) error }) (materials.Draft, error) {
 	var d materials.Draft
 	var options, answers []byte
-	err := row.Scan(&d.ID, &d.Kind, &d.Prompt, &options, &answers, &d.Explanation, &d.SourceQuote, &d.SourceLine, &d.Status)
+	err := row.Scan(&d.ID, &d.Kind, &d.Prompt, &options, &answers, &d.Explanation, &d.SourceQuote, &d.SourceLine, &d.Status, &d.Skill, &d.Target, &d.Difficulty)
 	if err == nil {
 		err = json.Unmarshal(options, &d.Options)
 	}
@@ -251,7 +251,18 @@ func (s Server) material(w http.ResponseWriter, r *http.Request) {
 		fail(w, 503, "Could not read drafts")
 		return
 	}
-	respond(w, 200, map[string]any{"material": m, "exercises": drafts, "generator": materials.GeneratorVersion})
+	rows.Close()
+	var summaryRaw []byte
+	if s.DB.QueryRowContext(ctx, `SELECT generation_summary FROM materials WHERE id=$1`, id).Scan(&summaryRaw) != nil {
+		fail(w, 503, "Could not read generation summary")
+		return
+	}
+	var summary any
+	if json.Unmarshal(summaryRaw, &summary) != nil {
+		fail(w, 503, "Could not read generation summary")
+		return
+	}
+	respond(w, 200, map[string]any{"material": m, "exercises": drafts, "generator": materials.GeneratorVersion, "generationSummary": summary})
 }
 func (s Server) reviewSource(w http.ResponseWriter, r *http.Request) {
 	var body struct {
@@ -362,10 +373,12 @@ func (s Server) generate(w http.ResponseWriter, r *http.Request) {
 	var drafts []materials.Draft
 	skipped := []materials.GenerationIssue{}
 	version := materials.GeneratorVersion
+	var summary *materials.GenerationSummary
 	if body.Mode == "api" {
 		var generated materials.GenerationResult
 		generated, err = s.Generator.Generate(ctx, source, id, body.Count)
 		drafts, skipped = generated.Exercises, generated.Skipped
+		summary = &generated.Summary
 		version = materials.APIGeneratorVersion
 	} else {
 		drafts, err = materials.Generate(source, id, body.Count)
@@ -381,9 +394,16 @@ func (s Server) generate(w http.ResponseWriter, r *http.Request) {
 		}
 		options, _ := json.Marshal(d.Options)
 		answers, _ := json.Marshal(d.Answers)
-		_, err = tx.ExecContext(ctx, `INSERT INTO exercises(id,material_id,kind,prompt,options,answers,explanation,source_quote,source_line,status,generator_version) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,'draft',$10)`, d.ID, id, d.Kind, d.Prompt, string(options), string(answers), d.Explanation, d.SourceQuote, d.SourceLine, version)
+		_, err = tx.ExecContext(ctx, `INSERT INTO exercises(id,material_id,kind,prompt,options,answers,explanation,source_quote,source_line,status,generator_version,skill,target,difficulty) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,'draft',$10,$11,$12,$13)`, d.ID, id, d.Kind, d.Prompt, string(options), string(answers), d.Explanation, d.SourceQuote, d.SourceLine, version, d.Skill, d.Target, d.Difficulty)
 		if err != nil {
 			fail(w, 503, "Could not save exercise drafts")
+			return
+		}
+	}
+	if summary != nil {
+		raw, _ := json.Marshal(summary)
+		if _, err = tx.ExecContext(ctx, `UPDATE materials SET generation_summary=$2 WHERE id=$1`, id, string(raw)); err != nil {
+			fail(w, 503, "Could not save generation summary")
 			return
 		}
 	}
@@ -391,7 +411,7 @@ func (s Server) generate(w http.ResponseWriter, r *http.Request) {
 		fail(w, 503, "Could not confirm generation. Retry to load any saved drafts")
 		return
 	}
-	respond(w, 201, map[string]any{"count": len(drafts), "existing": false, "skipped": skipped, "languageReviewed": body.Mode == "api"})
+	respond(w, 201, map[string]any{"count": len(drafts), "existing": false, "skipped": skipped, "languageReviewed": body.Mode == "api", "mix": summary})
 }
 func (s Server) editExercise(w http.ResponseWriter, r *http.Request) {
 	var body struct {
@@ -400,6 +420,9 @@ func (s Server) editExercise(w http.ResponseWriter, r *http.Request) {
 		Options     []string `json:"options"`
 		Answers     []string `json:"answers"`
 		Explanation string   `json:"explanation"`
+		Skill       *string  `json:"skill"`
+		Target      *string  `json:"target"`
+		Difficulty  *string  `json:"difficulty"`
 	}
 	if !decode(w, r, &body, 8192) {
 		return
@@ -426,6 +449,15 @@ func (s Server) editExercise(w http.ResponseWriter, r *http.Request) {
 	d.Options = body.Options
 	d.Answers = body.Answers
 	d.Explanation = body.Explanation
+	if body.Skill != nil {
+		d.Skill = *body.Skill
+	}
+	if body.Target != nil {
+		d.Target = *body.Target
+	}
+	if body.Difficulty != nil {
+		d.Difficulty = *body.Difficulty
+	}
 	if d.Options == nil {
 		d.Options = []string{}
 	}
@@ -435,7 +467,7 @@ func (s Server) editExercise(w http.ResponseWriter, r *http.Request) {
 	}
 	options, _ := json.Marshal(d.Options)
 	answers, _ := json.Marshal(d.Answers)
-	_, err = tx.ExecContext(ctx, `UPDATE exercises SET kind=$2,prompt=$3,options=$4,answers=$5,explanation=$6 WHERE id=$1`, d.ID, d.Kind, d.Prompt, string(options), string(answers), d.Explanation)
+	_, err = tx.ExecContext(ctx, `UPDATE exercises SET kind=$2,prompt=$3,options=$4,answers=$5,explanation=$6,skill=$7,target=$8,difficulty=$9 WHERE id=$1`, d.ID, d.Kind, d.Prompt, string(options), string(answers), d.Explanation, d.Skill, d.Target, d.Difficulty)
 	if err != nil {
 		fail(w, 503, "Could not save question")
 		return

@@ -68,7 +68,7 @@ test('bulk publishing includes edits; deleting questions preserves personal hist
  expect(await(await request.get('/api/exercises?materialId='+materialID)).json()).toHaveLength(1);
  await page.getByRole('button',{name:'History',exact:true}).click();
  await expect(page.locator('.history-item')).toHaveCount(1);await expect(page.locator('.history-item')).toContainText(chosenDraft.explanation);
- const mixed=page.waitForResponse(r=>new URL(r.url()).pathname==='/api/practice/question'&&!new URL(r.url()).search);
+ const mixed=page.waitForResponse(r=>new URL(r.url()).pathname==='/api/practice/question'&&!new URL(r.url()).searchParams.has('materialId'));
  await page.getByRole('button',{name:'Practice',exact:true}).click();const question=await(await mixed).json();
  expect(question.id).toBeTruthy();
  await expect(page.locator('.exercise-prompt')).toHaveCount(1);

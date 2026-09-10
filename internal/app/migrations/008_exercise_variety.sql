@@ -1,0 +1,12 @@
+ALTER TABLE exercises DROP CONSTRAINT exercises_kind_check;
+ALTER TABLE exercises ADD CONSTRAINT exercises_kind_check CHECK(kind IN ('cloze','multiple_choice','multi_select'));
+ALTER TABLE exercises ADD COLUMN skill TEXT NOT NULL DEFAULT '' CHECK(skill IN ('','grammar','vocabulary','communication','reading'));
+ALTER TABLE exercises ADD COLUMN target TEXT NOT NULL DEFAULT '';
+ALTER TABLE exercises ADD COLUMN difficulty TEXT NOT NULL DEFAULT '' CHECK(difficulty IN ('','easy','medium','hard'));
+ALTER TABLE materials ADD COLUMN generation_summary JSONB NOT NULL DEFAULT '{}';
+ALTER TABLE attempts ADD COLUMN selected_options JSONB NOT NULL DEFAULT '[]';
+ALTER TABLE attempts ADD COLUMN correct_options JSONB NOT NULL DEFAULT '[]';
+ALTER TABLE attempts ADD COLUMN question_kind TEXT NOT NULL DEFAULT '';
+ALTER TABLE attempts ADD COLUMN question_skill TEXT NOT NULL DEFAULT '';
+ALTER TABLE attempts ADD COLUMN question_target TEXT NOT NULL DEFAULT '';
+UPDATE attempts a SET question_kind=e.kind FROM exercises e WHERE a.exercise_id=e.id;

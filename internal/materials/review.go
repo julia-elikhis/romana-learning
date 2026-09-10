@@ -100,7 +100,8 @@ func applyLanguageReview(generated GenerationResult, verdicts []languageVerdict)
 	}
 	if len(approved) == 0 {
 		last := generated.Skipped[len(generated.Skipped)-1]
-		return GenerationResult{}, fmt.Errorf("No questions passed the Romanian language review. Question %d: %s. Nothing was saved; try generating again", last.Question, last.Reason)
+		generated.Exercises = approved
+		return generated, fmt.Errorf("No questions passed the Romanian language review. Question %d: %s. Nothing was saved; try generating again", last.Question, last.Reason)
 	}
 	generated.Exercises = approved
 	return generated, nil

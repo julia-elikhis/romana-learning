@@ -25,6 +25,9 @@ type Draft struct {
 	SourceQuote string   `json:"sourceQuote"`
 	SourceLine  int      `json:"sourceLine"`
 	Status      string   `json:"status"`
+	Skill       string   `json:"skill,omitempty"`
+	Target      string   `json:"target,omitempty"`
+	Difficulty  string   `json:"difficulty,omitempty"`
 }
 
 var words = regexp.MustCompile(`[\p{L}]+(?:[-’'][\p{L}]+)*`)
@@ -151,8 +154,8 @@ func Validate(d Draft) error {
 		}
 	}
 
-	if d.Kind != "cloze" && d.Kind != "multiple_choice" {
-		return errors.New("Choose cloze or multiple_choice")
+	if d.Kind != "cloze" && d.Kind != "multiple_choice" && d.Kind != "multi_select" {
+		return errors.New("Choose cloze, multiple_choice, or multi_select")
 	}
 	if len(strings.TrimSpace(d.Prompt)) < 5 || len(d.Prompt) > 1000 {
 		return errors.New("Provide a question under 1,000 characters")
@@ -174,24 +177,40 @@ func Validate(d Draft) error {
 	if d.Kind == "cloze" && len(d.Options) != 0 {
 		return errors.New("Cloze exercises do not have answer options")
 	}
-	if d.Kind == "multiple_choice" {
-		if len(d.Options) < 2 || len(d.Options) > 5 || len(d.Answers) != 1 {
+	if d.Skill != "" && d.Skill != "grammar" && d.Skill != "vocabulary" && d.Skill != "communication" && d.Skill != "reading" {
+		return errors.New("Choose a supported learning skill")
+	}
+	if d.Difficulty != "" && d.Difficulty != "easy" && d.Difficulty != "medium" && d.Difficulty != "hard" {
+		return errors.New("Choose easy, medium, or hard difficulty")
+	}
+	if len(d.Target) > 160 || strings.ContainsRune(d.Target, 0) {
+		return errors.New("Keep the learning target under 160 bytes")
+	}
+	if d.Kind == "multiple_choice" || d.Kind == "multi_select" {
+		if d.Kind == "multiple_choice" && (len(d.Options) < 2 || len(d.Options) > 5 || len(d.Answers) != 1) {
 			return errors.New("Multiple choice needs 2–5 options and one answer")
 		}
+		if d.Kind == "multi_select" && (len(d.Options) < 3 || len(d.Options) > 5 || len(d.Answers) < 2 || len(d.Answers) >= len(d.Options)) {
+			return errors.New("Multi-select needs 3–5 options, at least two correct answers, and at least one incorrect option")
+		}
 		seen := map[string]bool{}
-		match := false
 		for _, o := range d.Options {
 			k := Normalize(o)
 			if k == "" || len(o) > 200 || seen[k] {
 				return errors.New("Options must be nonempty and distinct")
 			}
 			seen[k] = true
-			if k == Normalize(d.Answers[0]) {
-				match = true
-			}
 		}
-		if !match {
-			return errors.New("The correct answer must be an option")
+		accepted := map[string]bool{}
+		for _, answer := range d.Answers {
+			key := Normalize(answer)
+			if !seen[key] {
+				return errors.New("Every correct answer must be an option")
+			}
+			if accepted[key] {
+				return errors.New("Correct options must be distinct")
+			}
+			accepted[key] = true
 		}
 	}
 	return nil

@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"regexp"
-	"strings"
+	"slices"
 	"time"
 
 	"github.com/julia-elikhis/romana-learning/internal/filestore"
@@ -20,16 +20,18 @@ type Server struct {
 	Auth      *GitHubAuth
 }
 type Attempt struct {
-	ID         string `json:"id"`
-	ExerciseID string `json:"exerciseId"`
-	Answer     string `json:"answer"`
+	ID         string   `json:"id"`
+	ExerciseID string   `json:"exerciseId"`
+	Answer     string   `json:"answer"`
+	Selections []string `json:"selections,omitempty"`
 }
 type Result struct {
-	Saved       bool   `json:"saved"`
-	Correct     bool   `json:"correct"`
-	Answer      string `json:"answer"`
-	Explanation string `json:"explanation"`
-	SourceQuote string `json:"sourceQuote,omitempty"`
+	Saved       bool     `json:"saved"`
+	Correct     bool     `json:"correct"`
+	Answer      string   `json:"answer"`
+	Explanation string   `json:"explanation"`
+	SourceQuote string   `json:"sourceQuote,omitempty"`
+	Answers     []string `json:"answers,omitempty"`
 }
 
 var validID = regexp.MustCompile(`^[a-zA-Z0-9-]{16,80}$`)
@@ -160,20 +162,26 @@ func (s Server) attempt(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &a, 4096) {
 		return
 	}
-	if !validID.MatchString(a.ID) || a.ExerciseID == "" || len(a.ExerciseID) > 80 || materials.Normalize(a.Answer) == "" || len(a.Answer) > 200 || strings.ContainsRune(a.Answer, 0) {
+	if !validID.MatchString(a.ID) || a.ExerciseID == "" || len(a.ExerciseID) > 80 || !prepareAttempt(&a) {
 		fail(w, 400, "Invalid attempt")
 		return
 	}
 	ctx, cancel := contextFor(r)
 	defer cancel()
 	var storedExercise, storedAnswer string
+	var storedSelections, correctOptions []byte
 	var result Result
 	user := currentUser(r)
 	read := func() error {
-		return s.DB.QueryRowContext(ctx, `SELECT exercise_id,answer,correct,correct_answer,explanation,source_quote FROM attempts WHERE id=$1 AND user_id=$2`, a.ID, user.ID).Scan(&storedExercise, &storedAnswer, &result.Correct, &result.Answer, &result.Explanation, &result.SourceQuote)
+		return s.DB.QueryRowContext(ctx, `SELECT exercise_id,answer,correct,correct_answer,explanation,source_quote,selected_options,correct_options FROM attempts WHERE id=$1 AND user_id=$2`, a.ID, user.ID).Scan(&storedExercise, &storedAnswer, &result.Correct, &result.Answer, &result.Explanation, &result.SourceQuote, &storedSelections, &correctOptions)
 	}
 	reply := func() {
-		if storedExercise != a.ExerciseID || storedAnswer != a.Answer {
+		var selected []string
+		if json.Unmarshal(storedSelections, &selected) != nil || json.Unmarshal(correctOptions, &result.Answers) != nil {
+			fail(w, 503, "Could not read saved answer")
+			return
+		}
+		if storedExercise != a.ExerciseID || storedAnswer != a.Answer || !slices.Equal(selected, a.Selections) {
 			fail(w, 409, "Attempt identifier already used")
 			return
 		}
@@ -207,29 +215,18 @@ func (s Server) attempt(w http.ResponseWriter, r *http.Request) {
 		fail(w, 503, "Could not load exercise")
 		return
 	}
-	if d.Kind == "multiple_choice" {
-		found := false
-		for _, o := range d.Options {
-			if o == a.Answer {
-				found = true
-			}
-		}
-		if !found {
-			fail(w, 400, "Choose an available answer")
-			return
-		}
-	}
-	correct := false
-	for _, answer := range d.Answers {
-		if materials.Normalize(a.Answer) == materials.Normalize(answer) {
-			correct = true
-		}
-	}
-	if user == nil {
-		respond(w, 200, Result{Correct: correct, Answer: d.Answers[0], Explanation: d.Explanation, SourceQuote: d.SourceQuote, Saved: false})
+	correct, correctAnswer, answerSet, err := gradeAttempt(d, a)
+	if err != nil {
+		fail(w, 400, err.Error())
 		return
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO attempts(id,exercise_id,answer,correct,correct_answer,explanation,source_quote,user_id,question_prompt) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(user_id,id) DO NOTHING`, a.ID, a.ExerciseID, a.Answer, correct, d.Answers[0], d.Explanation, d.SourceQuote, user.ID, d.Prompt)
+	if user == nil {
+		respond(w, 200, Result{Correct: correct, Answer: correctAnswer, Answers: answerSet, Explanation: d.Explanation, SourceQuote: d.SourceQuote, Saved: false})
+		return
+	}
+	selectedJSON, _ := json.Marshal(nonNilStrings(a.Selections))
+	correctJSON, _ := json.Marshal(nonNilStrings(answerSet))
+	_, err = tx.ExecContext(ctx, `INSERT INTO attempts(id,exercise_id,answer,correct,correct_answer,explanation,source_quote,user_id,question_prompt,selected_options,correct_options,question_kind,question_skill,question_target) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) ON CONFLICT(user_id,id) DO NOTHING`, a.ID, a.ExerciseID, a.Answer, correct, correctAnswer, d.Explanation, d.SourceQuote, user.ID, d.Prompt, string(selectedJSON), string(correctJSON), d.Kind, d.Skill, d.Target)
 	if err != nil {
 		fail(w, 503, "Answer was not saved. Please retry.")
 		return

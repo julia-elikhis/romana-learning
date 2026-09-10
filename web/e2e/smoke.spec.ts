@@ -20,7 +20,7 @@ test('public practice works without saving history or allowing uploads',async({p
  await page.getByRole('button',{name:'Practice',exact:true}).click();
  await expect(page.locator('.exercise-prompt')).toBeVisible();
  const typed=page.getByLabel('Your answer',{exact:true});
- if(await typed.count())await typed.fill('sunt');else await page.locator('.options button').first().click();
+ if(await typed.count())await typed.fill('sunt');else if(await page.locator('.multi-options').count())await page.getByRole('checkbox').first().check();else await page.locator('.options button').first().click();
  const answer=page.waitForResponse(r=>r.url().endsWith('/api/attempts')&&r.request().method()==='POST');
  await page.getByRole('button',{name:'Check answer'}).click();expect((await(await answer).json()).saved).toBe(false);
  await expect(page.getByText('Anonymous practice · answer not saved',{exact:true})).toBeVisible();

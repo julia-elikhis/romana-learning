@@ -12,7 +12,7 @@ import (
 
 func TestAPIProducesTraceableDrafts(t *testing.T) {
 	source := "Eu sunt acasă în fiecare zi."
-	candidate := Draft{ID: "untrusted", Kind: "cloze", Prompt: "Eu ____ acasă în fiecare zi.", Options: []string{}, Answers: []string{"sunt"}, Explanation: "Eu sunt means I am.", SourceQuote: source, SourceLine: 1, Status: "published"}
+	candidate := Draft{ID: "untrusted", Kind: "cloze", Prompt: "Eu ____ acasă în fiecare zi.", Options: []string{}, Answers: []string{"sunt"}, Explanation: "Eu sunt means I am.", SourceQuote: source, SourceLine: 1, Status: "published", Skill: "grammar", Target: "a fi / eu", Difficulty: "easy"}
 	var received, reviewed bool
 	wantEffort := ""
 	wantFormat := ""
@@ -63,7 +63,7 @@ func TestAPIProducesTraceableDrafts(t *testing.T) {
 		t.Fatal(err)
 	}
 	api.client.Transport = server.Client().Transport
-	result, err := api.Generate(context.Background(), source, "material", 5)
+	result, err := api.Generate(context.Background(), source, "material", 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,18 +84,18 @@ func TestAPIProducesTraceableDrafts(t *testing.T) {
 				t.Fatal(err)
 			}
 			api.client.Transport = server.Client().Transport
-			if _, err = api.Generate(context.Background(), source, "material", 5); err != nil {
+			if _, err = api.Generate(context.Background(), source, "material", 1); err != nil {
 				t.Fatal(err)
 			}
 		}
 	}
 	candidate.SourceQuote = "Noi avem o casă."
-	if _, err = api.Generate(context.Background(), source, "material", 5); err == nil {
+	if _, err = api.Generate(context.Background(), source, "material", 1); err == nil {
 		t.Fatal("Invented source was accepted")
 	}
 	candidate.SourceQuote = source
 	candidate.Answers = []string{}
-	if _, err = api.Generate(context.Background(), source, "material", 5); err == nil {
+	if _, err = api.Generate(context.Background(), source, "material", 1); err == nil {
 		t.Fatal("Unsupported answer accepted")
 	}
 }

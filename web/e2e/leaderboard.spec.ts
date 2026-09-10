@@ -27,9 +27,10 @@ test('leaderboard shows top learners and own rank, refreshing after a saved answ
  if(page.viewportSize()!.width<=800)expect(widgetBox!.y).toBeGreaterThan(missionBox!.y+missionBox!.height);
  else {expect(widgetBox!.x).toBeLessThan(missionBox!.x);expect(Math.abs(widgetBox!.y-missionBox!.y)).toBeLessThan(2)}
  const questions=await(await request.get('/api/admin/questions')).json();
- const answer=questions.questions.find((q:{id:string})=>q.id===deck.id).answers[0];
+ const answers=questions.questions.find((q:{id:string})=>q.id===deck.id).answers;
+ const answer=answers[0];
  const typed=page.getByLabel('Your answer',{exact:true});
- if(await typed.count())await typed.fill(answer);else await page.locator('.options').getByRole('button',{name:answer,exact:true}).click();
+ if(await typed.count())await typed.fill(answer);else if(deck.kind==='multi_select'){for(const value of answers)await page.getByRole('checkbox',{name:value,exact:true}).check()}else await page.locator('.options').getByRole('button',{name:answer,exact:true}).click();
  score=3;
  await page.getByRole('button',{name:'Check answer',exact:true}).click();
  await expect(page.getByText('Saved to your history',{exact:true})).toBeVisible();
