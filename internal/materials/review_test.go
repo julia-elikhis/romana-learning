@@ -97,6 +97,13 @@ func TestIncompleteOrInconsistentLanguageReviewFailsClosed(t *testing.T) {
 	if err == nil || len(result.Exercises) != 0 || !strings.Contains(err.Error(), "No questions passed") {
 		t.Fatal("A completely rejected review must not return drafts")
 	}
+	result, err = applyLanguageReview(generated, []languageVerdict{
+		{ID: "one", Approved: boolPointer(false), Issues: []string{"topic"}},
+		{ID: "two", Approved: boolPointer(true), Issues: []string{}},
+	})
+	if err != nil || len(result.Exercises) != 1 || len(result.Skipped) != 1 || !strings.Contains(result.Skipped[0].Reason, "plot details") {
+		t.Fatal("Plot-focused questions must be rejected with the topic review reason")
+	}
 }
 
 func TestLanguageReviewProviderFailuresNeverReturnUnreviewedDrafts(t *testing.T) {

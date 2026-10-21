@@ -59,7 +59,7 @@ func generationSlots(mix map[string]int) []generationSlot {
 	return slots
 }
 
-func (a *API) generateMixed(parent context.Context, source, original, materialID string, count int) (GenerationResult, error) {
+func (a *API) generateMixed(parent context.Context, source, original, materialID string, count int, existingPrompts []string) (GenerationResult, error) {
 	// Keep the existing overall request deadline. Reserve time for saving already
 	// reviewed drafts even if an optional replacement request uses its time budget.
 	budget := time.Now().Add(GenerationTimeout - 10*time.Second)
@@ -71,6 +71,14 @@ func (a *API) generateMixed(parent context.Context, source, original, materialID
 	result := GenerationResult{Exercises: []Draft{}, Skipped: []GenerationIssue{}, positions: map[string]int{}, Summary: GenerationSummary{Requested: PracticeMix(count), Created: PracticeMix(0), Shortfall: PracticeMix(0)}}
 	remaining := PracticeMix(count)
 	seen := map[string]bool{}
+	avoid := make([]string, 0, len(existingPrompts))
+	for _, prompt := range existingPrompts {
+		if strings.TrimSpace(prompt) == "" {
+			continue
+		}
+		seen[Normalize(prompt)] = true
+		avoid = append(avoid, prompt)
+	}
 	targets := map[string]int{}
 	offset := 0
 	var lastError error
@@ -89,7 +97,6 @@ func (a *API) generateMixed(parent context.Context, source, original, materialID
 			}
 			result.Summary.RefillAttempted = true
 		}
-		avoid := []string{}
 		for _, d := range result.Exercises {
 			avoid = append(avoid, d.Prompt)
 		}

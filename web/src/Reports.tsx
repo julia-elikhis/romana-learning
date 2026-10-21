@@ -3,7 +3,7 @@ import {api,json,type ReportPage} from './api';
 import {QuestionCard,formFor,type QuestionForm} from './QuestionCard';
 
 export function Reports(){
- const [status,setStatus]=useState('open'),[page,setPage]=useState(1),[revision,setRevision]=useState(0);
+ const [status,setStatus]=useState<'open'|'resolved'|'all'>('open'),[page,setPage]=useState(1),[revision,setRevision]=useState(0);
  const [data,setData]=useState<ReportPage>(),[loading,setLoading]=useState(true),[busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
  const [edits,setEdits]=useState<Record<string,QuestionForm>>({});
  useEffect(()=>{
@@ -21,12 +21,12 @@ export function Reports(){
   catch(e){setError((e as Error).message);return false}finally{setBusy(false)}
  }
  return <main className="management-layout">
-  <div className="library-heading"><div><span className="eyebrow">QUESTION REPORTS</span><h1>A second look.</h1><p>Review what learners noticed, correct the question, and resolve the report.</p></div><label>Report status<select value={status} disabled={busy} onChange={e=>{setStatus(e.target.value);setPage(1);setNotice('')}}><option value="open">Open</option><option value="resolved">Resolved</option></select></label></div>
+ <div className="library-heading"><div><span className="eyebrow">QUESTION REPORTS</span><h1>A second look.</h1><p>Review what learners noticed, correct the question, and resolve the report.</p></div><label>Report status<select value={status} disabled={busy} onChange={e=>{setStatus(e.target.value as 'open'|'resolved'|'all');setPage(1);setNotice('')}}><option value="open">Open</option><option value="resolved">Resolved</option><option value="all">All</option></select></label></div>
   {error&&<p role="alert" className="error banner">{error}<button className="text-button" onClick={()=>setRevision(r=>r+1)}>Retry reports</button></p>}
   {notice&&<p role="status" className="feedback">{notice}</p>}
   <p className="results-count" role="status">{loading?'Loading reports…':data?`${data.total} ${status} ${data.total===1?'report':'reports'}`:''}</p>
   <div className="report-collection" aria-busy={loading}>
-   {!loading&&data?.reports.length===0&&<div className="panel"><h2>{status==='open'?'All caught up.':'No resolved reports yet.'}</h2><p>{status==='open'?'New question reports will appear here.':'Reviewed reports will be kept here.'}</p></div>}
+   {!loading&&data?.reports.length===0&&<div className="panel"><h2>{status==='open'?'All caught up.':status==='resolved'?'No resolved reports yet.':'No reported questions yet.'}</h2><p>{status==='open'?'New question reports will appear here.':status==='resolved'?'Reviewed reports will be kept here.':'Question reports will appear here.'}</p></div>}
    {data?.reports.map(report=><section key={report.id} className="report-card panel" aria-label={'Report: '+report.prompt}>
     <div className="report-meta"><span>{report.reporter||'Anonymous learner'}</span><time dateTime={report.createdAt}>{new Date(report.createdAt).toLocaleDateString()}</time><span className="status-tag">{report.status}</span></div>
     <p className="report-note">{report.note||'This question was flagged for review without a note.'}</p>

@@ -29,7 +29,7 @@ func SyncOriginals(ctx context.Context, source, target Store, originals []Origin
 		}
 		reader, err := target.Open(ctx, original.Key)
 		if err == nil {
-			existing, readErr := io.ReadAll(io.LimitReader(reader, 20*1024*1024+1))
+			existing, readErr := io.ReadAll(io.LimitReader(reader, 50*1024*1024+1))
 			reader.Close()
 			if readErr != nil || !matchesOriginal(existing, original) {
 				return errors.New("destination original differs from the database hash")
@@ -52,7 +52,7 @@ func readOriginal(ctx context.Context, store Store, original Original) ([]byte, 
 		return nil, errors.New("original is unavailable")
 	}
 	defer reader.Close()
-	data, err := io.ReadAll(io.LimitReader(reader, 20*1024*1024+1))
+	data, err := io.ReadAll(io.LimitReader(reader, 50*1024*1024+1))
 	if err != nil || !matchesOriginal(data, original) {
 		return nil, errors.New("original does not match its database hash")
 	}
@@ -61,7 +61,7 @@ func readOriginal(ctx context.Context, store Store, original Original) ([]byte, 
 
 func matchesOriginal(data []byte, original Original) bool {
 	digest := sha256.Sum256(data)
-	return len(data) <= 20*1024*1024 && hex.EncodeToString(digest[:]) == original.Hash
+	return len(data) <= 50*1024*1024 && hex.EncodeToString(digest[:]) == original.Hash
 }
 
 // RemoveOriginal is used by the isolated test-account cleanup, not an HTTP route.

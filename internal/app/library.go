@@ -102,19 +102,14 @@ func (s Server) upload(w http.ResponseWriter, r *http.Request) {
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, materials.MaxUpload+(1<<20))
 	if err := r.ParseMultipartForm(materials.MaxUpload); err != nil {
-		fail(w, 400, "Upload a file up to 20 MB")
+		fail(w, 400, "Upload a file up to 50 MB")
 		return
 	}
 	if r.MultipartForm != nil {
 		defer r.MultipartForm.RemoveAll()
 	}
-	title := strings.TrimSpace(r.FormValue("title"))
 	kind := r.FormValue("kind")
 	replaces := r.FormValue("replacesId")
-	if title == "" || len(title) > 200 {
-		fail(w, 400, "Provide a title under 200 characters")
-		return
-	}
 	if kind != "notes" && kind != "teacher_corrections" && kind != "homework" && kind != "student_submission" {
 		fail(w, 400, "Choose the material's role")
 		return
@@ -127,12 +122,20 @@ func (s Server) upload(w http.ResponseWriter, r *http.Request) {
 	defer file.Close()
 	raw, err := io.ReadAll(io.LimitReader(file, materials.MaxUpload+1))
 	if err != nil || len(raw) > materials.MaxUpload {
-		fail(w, 400, "File must be smaller than 20 MB")
+		fail(w, 400, "File must be smaller than 50 MB")
 		return
 	}
 	filename := filepath.Base(header.Filename)
 	if len(filename) > 255 {
 		fail(w, 400, "Filename is too long")
+		return
+	}
+	title := strings.TrimSpace(r.FormValue("title"))
+	if title == "" {
+		title = deriveTitle(filename)
+	}
+	if title == "" || len(title) > 200 {
+		fail(w, 400, "Provide a title under 200 characters")
 		return
 	}
 	ctx, cancel := contextFor(r)
@@ -203,6 +206,22 @@ func (s Server) upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respond(w, 201, map[string]any{"id": id, "duplicate": false})
+}
+
+func deriveTitle(filename string) string {
+	base := filepath.Base(filename)
+	title := strings.TrimSpace(strings.TrimSuffix(base, filepath.Ext(base)))
+	if title == "" {
+		title = base
+	}
+	if len(title) > 200 {
+		runes := []rune(title)
+		for len(runes) > 0 && len(string(runes)) > 200 {
+			runes = runes[:len(runes)-1]
+		}
+		title = string(runes)
+	}
+	return strings.TrimSpace(title)
 }
 
 const exerciseFields = `id,kind,prompt,options,answers,explanation,source_quote,source_line,status,skill,target,difficulty`
@@ -361,27 +380,38 @@ func (s Server) generate(w http.ResponseWriter, r *http.Request) {
 		fail(w, 409, "Generate from teaching notes or teacher corrections")
 		return
 	}
-	var existing int
-	if err = tx.QueryRowContext(ctx, `SELECT count(*) FROM exercises WHERE material_id=$1`, id).Scan(&existing); err != nil {
-		fail(w, 503, "Could not read drafts")
+	existingRows, err := tx.QueryContext(ctx, `SELECT prompt FROM exercises WHERE material_id=$1 AND status<>'deleted' ORDER BY created_at,id`, id)
+	if err != nil {
+		fail(w, 503, "Could not read existing questions")
+	}
+	existingPrompts := []string{}
+	for existingRows.Next() {
+		var prompt string
+		if err = existingRows.Scan(&prompt); err != nil {
+			existingRows.Close()
+			fail(w, 503, "Could not read existing questions")
+			return
+		}
+		existingPrompts = append(existingPrompts, prompt)
+	}
+	if err = existingRows.Err(); err != nil {
+		existingRows.Close()
+		fail(w, 503, "Could not read existing questions")
 		return
 	}
-	if existing > 0 {
-		respond(w, 200, map[string]any{"count": existing, "existing": true})
-		return
-	}
+	existingRows.Close()
 	var drafts []materials.Draft
 	skipped := []materials.GenerationIssue{}
 	version := materials.GeneratorVersion
 	var summary *materials.GenerationSummary
 	if body.Mode == "api" {
 		var generated materials.GenerationResult
-		generated, err = s.Generator.Generate(ctx, source, id, body.Count)
+		generated, err = s.Generator.Generate(ctx, source, id, body.Count, existingPrompts...)
 		drafts, skipped = generated.Exercises, generated.Skipped
 		summary = &generated.Summary
 		version = materials.APIGeneratorVersion
 	} else {
-		drafts, err = materials.Generate(source, id, body.Count)
+		drafts, err = materials.Generate(source, id, body.Count, existingPrompts...)
 	}
 	if err != nil {
 		fail(w, 422, err.Error())

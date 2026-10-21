@@ -19,6 +19,7 @@ var languageIssueReasons = map[string]string{
 	"spelling":    "The Romanian spelling or diacritics need correction",
 	"answer":      "The accepted answer is incorrect or incomplete",
 	"ambiguity":   "The question allows an unclear or ambiguous answer",
+	"topic":       "The question must examine language rather than plot details",
 	"source":      "The question or intended answer is not supported by the lesson",
 	"explanation": "The explanation does not correctly explain the Romanian",
 }

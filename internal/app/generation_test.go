@@ -92,3 +92,35 @@ func TestAIGenerationSavesOnlyAfterLanguageApproval(t *testing.T) {
 		t.Fatal("Language approval automatically published questions")
 	}
 }
+
+func TestRepeatedGenerationAppendsDraftsWithoutDuplicates(t *testing.T) {
+	db := isolatedDB(t)
+	handler := authenticatedHandler(t, db, Server{DB: db}.Routes())
+	id, _ := questionFixtures(t, db, 0, "draft")
+	source := "Eu sunt acasă în fiecare zi.\nNoi avem o casă frumoasă.\nTu mergi la școală dimineața.\nEi lucrează în fiecare dimineață."
+	if _, err := db.Exec(`UPDATE materials SET extracted_text=$2 WHERE id=$1`, id, source); err != nil {
+		t.Fatal(err)
+	}
+	generate := func() int {
+		t.Helper()
+		response := questionRequest(t, handler, "POST", "/api/materials/"+id+"/generate", map[string]any{"count": 2}, 201)
+		var result struct{ Count int }
+		if json.Unmarshal(response, &result) != nil {
+			t.Fatal("Invalid generation response")
+		}
+		return result.Count
+	}
+	if first := generate(); first != 2 {
+		t.Fatalf("First generation created %d drafts, want 2", first)
+	}
+	if _, err := db.Exec(`UPDATE exercises SET status='published' WHERE material_id=$1`, id); err != nil {
+		t.Fatal(err)
+	}
+	if second := generate(); second != 2 {
+		t.Fatalf("Second generation created %d drafts, want 2", second)
+	}
+	var total, distinct int
+	if err := db.QueryRow(`SELECT count(*),count(DISTINCT lower(prompt)) FROM exercises WHERE material_id=$1`, id).Scan(&total, &distinct); err != nil || total != 4 || distinct != 4 {
+		t.Fatalf("Repeated generation saved duplicates or the wrong total: total=%d distinct=%d err=%v", total, distinct, err)
+	}
+}

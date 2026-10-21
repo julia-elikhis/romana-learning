@@ -55,6 +55,24 @@ func isolatedDB(t *testing.T) *sql.DB {
 	}
 	return db
 }
+
+func TestDerivedTitles(t *testing.T) {
+	tests := []struct {
+		filename string
+		want     string
+	}{
+		{"lesson-12.pdf", "lesson-12"},
+		{"homework.docx", "homework"},
+		{"notes.txt", "notes"},
+		{".pdf", ".pdf"},
+		{"   spaces.pdf   ", "spaces"},
+	}
+	for _, tt := range tests {
+		if got := deriveTitle(tt.filename); got != tt.want {
+			t.Errorf("deriveTitle(%q) = %q, want %q", tt.filename, got, tt.want)
+		}
+	}
+}
 func TestLibraryLifecycle(t *testing.T) {
 	db := isolatedDB(t)
 	files, err := filestore.NewFilesystem(t.TempDir())

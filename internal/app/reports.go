@@ -80,25 +80,32 @@ func (s Server) adminReports(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if status != "open" && status != "resolved" {
+	if status != "open" && status != "resolved" && status != "all" {
 		fail(w, 400, "Invalid report status")
 		return
 	}
 	ctx, cancel := contextFor(r)
 	defer cancel()
 	const pageSize = 20
+	where := ""
+	arguments := []any{}
+	if status != "all" {
+		where = " WHERE r.status=$1"
+		arguments = append(arguments, status)
+	}
 	var total int
-	if s.DB.QueryRowContext(ctx, `SELECT count(*) FROM question_reports WHERE status=$1`, status).Scan(&total) != nil {
+	if s.DB.QueryRowContext(ctx, `SELECT count(*) FROM question_reports r`+where, arguments...).Scan(&total) != nil {
 		fail(w, 503, "Could not load reports")
 		return
 	}
+	arguments = append(arguments, pageSize, (page-1)*pageSize)
 	rows, err := s.DB.QueryContext(ctx, `SELECT r.id,r.exercise_id,r.question_prompt,r.note,COALESCE(u.login,''),r.status,r.created_at,
  CASE WHEN e.status='deleted' THEN 'null'::jsonb ELSE jsonb_build_object(
  'id',e.id,'kind',e.kind,'prompt',e.prompt,'options',e.options,'answers',e.answers,
  'explanation',e.explanation,'sourceQuote',e.source_quote,'sourceLine',e.source_line,'status',e.status,'skill',e.skill,'target',e.target,'difficulty',e.difficulty) END
  FROM question_reports r JOIN exercises e ON e.id=r.exercise_id
  LEFT JOIN app_users u ON u.id=r.reporter_id
- WHERE r.status=$1 ORDER BY r.created_at,r.id LIMIT $2 OFFSET $3`, status, pageSize, (page-1)*pageSize)
+`+where+` ORDER BY r.created_at,r.id LIMIT $`+strconv.Itoa(len(arguments)-1)+` OFFSET $`+strconv.Itoa(len(arguments)), arguments...)
 	if err != nil {
 		fail(w, 503, "Could not load reports")
 		return

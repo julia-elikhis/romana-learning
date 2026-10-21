@@ -14,7 +14,7 @@ import (
 	"unicode/utf8"
 )
 
-const MaxUpload = 20 << 20
+const MaxUpload = 50 << 20
 const MaxText = 200000
 const maxXML = 8 << 20
 

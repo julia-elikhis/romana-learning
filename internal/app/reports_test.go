@@ -85,7 +85,8 @@ func TestQuestionReportsPrivacyRetriesAndAdminReview(t *testing.T) {
 		t.Fatal("Review changed the learner's saved grading result")
 	}
 	questionRequest(t, admin, "PATCH", adminPath, map[string]string{"status": "resolved"}, 200)
-	if len(read("open")) != 1 || len(read("resolved")) != 1 {
+	all := read("all")
+	if len(read("open")) != 1 || len(read("resolved")) != 1 || len(all) != 2 || all[0].Status == all[1].Status {
 		t.Fatal("Resolved reports did not leave the open queue")
 	}
 	var audited bool

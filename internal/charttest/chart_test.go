@@ -149,7 +149,7 @@ func TestInvalidChartSettingsFail(t *testing.T) {
 		"unmanaged Google link":     "serviceAccount.create=false,serviceAccount.name=external,serviceAccount.gcpServiceAccount=learning@test-project.iam.gserviceaccount.com",
 		"multiple writers":          "storage.provider=filesystem,storage.filesystem.persistence.create=true,replicaCount=2",
 		"overlapping disk rollout":  "storage.provider=filesystem,storage.filesystem.persistence.create=true,strategy.type=RollingUpdate",
-			"ingress without login":    "ingress.enabled=true",
+		"ingress without login":     "ingress.enabled=true",
 		"public without OAuth":      "appMode=public,auth.baseURL=https://learn.example.com",
 		"public over HTTP":          "appMode=public,auth.existingSecret=github-auth",
 	}
@@ -233,7 +233,7 @@ func TestNGINXIngressUsesOAuthHostAndACMETLS(t *testing.T) {
 	if annotations["kubernetes.io/tls-acme"] != "true" || annotations["nginx.ingress.kubernetes.io/ssl-redirect"] != "true" {
 		t.Fatal("automatic certificates and HTTPS redirect must be enabled")
 	}
-	if annotations["nginx.ingress.kubernetes.io/proxy-body-size"] != "25m" ||
+	if annotations["nginx.ingress.kubernetes.io/proxy-body-size"] != "55m" ||
 		annotations["nginx.ingress.kubernetes.io/proxy-read-timeout"] != "180" ||
 		annotations["nginx.ingress.kubernetes.io/proxy-send-timeout"] != "180" {
 		t.Fatal("ingress must allow course uploads and the two-stage generation deadline")

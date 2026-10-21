@@ -43,6 +43,12 @@ func TestSourceGeneration(t *testing.T) {
 	if drafts[0].Kind != "multiple_choice" || drafts[1].Kind != "cloze" {
 		t.Fatal("missing exercise variety")
 	}
+	if strings.Contains(drafts[1].Prompt, "Complete the sentence") || strings.Contains(drafts[1].Prompt, "\n") {
+		t.Fatalf("cloze prompt should be only the sentence to complete: %q", drafts[1].Prompt)
+	}
+	if strings.Contains(drafts[1].Explanation, "Read the full sentence") {
+		t.Fatalf("cloze explanation should be concise: %q", drafts[1].Explanation)
+	}
 	for _, d := range drafts {
 		if err = Validate(d); err != nil {
 			t.Fatal(err)

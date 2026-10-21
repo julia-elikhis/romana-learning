@@ -9,8 +9,8 @@ ingress:
   annotations:
     kubernetes.io/tls-acme: "true"
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
-    # The app accepts 20 MiB files; allow room for the multipart request envelope.
-    nginx.ingress.kubernetes.io/proxy-body-size: "25m"
+    # The app accepts 50 MiB files; allow room for the multipart request envelope.
+    nginx.ingress.kubernetes.io/proxy-body-size: "55m"
     # Generation and Romanian review have a combined 120-second deadline.
     nginx.ingress.kubernetes.io/proxy-read-timeout: "180"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "180"

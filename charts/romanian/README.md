@@ -202,7 +202,7 @@ The `values-ingress-nginx.yaml` overlay selects the `nginx` IngressClass and ena
 
 `ingress.host` defaults to the hostname in `auth.baseURL`. Each `ingress.tls` entry requires `secretName`; omitted `hosts` use that same hostname. The overlay requests the certificate in `romana-learning-tls`. cert-manager creates and renews the certificate and its Secret in the app namespace. Override that Secret name for separate apps in the same namespace. The chart rejects mismatched OAuth/ingress hosts and TLS settings that omit the app hostname.
 
-The overlay enables HTTP-to-HTTPS redirects, a 25 MiB request-body allowance for the app's 20 MiB file limit, and 180-second upstream read/send timeouts for generation and Romanian review. See [NGINX ingress annotations](https://kubernetes.github.io/ingress-nginx/user-guide/nginx-configuration/annotations/).
+The overlay enables HTTP-to-HTTPS redirects, a 55 MiB request-body allowance for the app's 50 MiB file limit, and 180-second upstream read/send timeouts for generation and Romanian review. See [NGINX ingress annotations](https://kubernetes.github.io/ingress-nginx/user-guide/nginx-configuration/annotations/).
 
 Render production configuration directly from the selected SOPS settings:
 

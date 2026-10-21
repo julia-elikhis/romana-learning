@@ -47,12 +47,15 @@ func Normalize(s string) string {
 	s = strings.NewReplacer("ş", "ș", "ţ", "ț", "Ş", "Ș", "Ţ", "Ț").Replace(s)
 	return strings.ToLower(strings.Trim(strings.Join(strings.Fields(s), " "), " .!?\"„”"))
 }
-func Generate(text, materialID string, limit int) ([]Draft, error) {
+func Generate(text, materialID string, limit int, existingPrompts ...string) ([]Draft, error) {
 	if limit < 1 || limit > 20 {
 		return nil, errors.New("Choose between 1 and 20 exercises")
 	}
 	drafts := []Draft{}
 	seen := map[string]bool{}
+	for _, prompt := range existingPrompts {
+		seen[Normalize(prompt)] = true
+	}
 	for n, line := range strings.Split(text, "\n") {
 		for _, part := range sentenceSplit.Split(line, -1) {
 			quote := strings.TrimSpace(part)
@@ -113,7 +116,7 @@ func Generate(text, materialID string, limit int) ([]Draft, error) {
 			}
 			span := spans[selected]
 			answer := quote[span[0]:span[1]]
-			prompt := "Complete the sentence as it appears in your notes:\n" + quote[:span[0]] + "____" + quote[span[1]:]
+			prompt := quote[:span[0]] + "____" + quote[span[1]:]
 			if seen[Normalize(prompt)] {
 				continue
 			}
@@ -136,7 +139,7 @@ func Generate(text, materialID string, limit int) ([]Draft, error) {
 				options = append(options[shift:], options[:shift]...)
 			}
 			hash := sha256.Sum256([]byte(materialID + "\x00" + GeneratorVersion + "\x00" + prompt))
-			drafts = append(drafts, Draft{ID: "generated-" + hex.EncodeToString(hash[:16]), Kind: kind, Prompt: prompt, Options: options, Answers: []string{answer}, Explanation: fmt.Sprintf("Your notes use “%s” here. Read the full sentence, then recall it again.", answer), SourceQuote: quote, SourceLine: n + 1, Status: "draft"})
+			drafts = append(drafts, Draft{ID: "generated-" + hex.EncodeToString(hash[:16]), Kind: kind, Prompt: prompt, Options: options, Answers: []string{answer}, Explanation: fmt.Sprintf("Your notes use “%s” here.", answer), SourceQuote: quote, SourceLine: n + 1, Status: "draft"})
 			if len(drafts) == limit {
 				return drafts, nil
 			}

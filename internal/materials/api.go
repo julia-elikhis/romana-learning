@@ -92,7 +92,7 @@ type GenerationResult struct {
 //go:embed prompts/generate.txt
 var exerciseInstruction string
 
-func (a *API) Generate(ctx context.Context, source, materialID string, count int) (GenerationResult, error) {
+func (a *API) Generate(ctx context.Context, source, materialID string, count int, existingPrompts ...string) (GenerationResult, error) {
 	if !a.Ready() {
 		return GenerationResult{}, errors.New("Set EXERCISE_API_MODEL on the server before generating with this API")
 	}
@@ -106,7 +106,7 @@ func (a *API) Generate(ctx context.Context, source, materialID string, count int
 	if len(inputSource) > 30000 {
 		return GenerationResult{}, errors.New("For API generation, shorten the Romanian and English teaching text to 30 KB or split it into lessons")
 	}
-	return a.generateMixed(ctx, inputSource, source, materialID, count)
+	return a.generateMixed(ctx, inputSource, source, materialID, count, existingPrompts)
 }
 
 // Each pass starts a fresh conversation with the same private provider settings.
